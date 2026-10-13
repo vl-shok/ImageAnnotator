@@ -190,12 +190,46 @@ class NumberEditor(QWidget):
         self.valueChanged.emit(float(val) if self.is_float else int(val))
 
 
+class ToggleEditor(QToolButton):
+    """Кнопка-переключатель с буквой (Ж/К — жирный/курсив)."""
+    valueChanged = Signal(object)
+    compact = True
+
+    def __init__(self, spec, parent=None):
+        super().__init__(parent)
+        self.setObjectName("IconToggle")
+        self.setCheckable(True)
+        self.setText(spec.icon or spec.label[:1])
+        f = self.font()
+        f.setPointSizeF(11)
+        if spec.name == "bold":
+            f.setBold(True)
+        if spec.name == "italic":
+            f.setItalic(True)
+            f.setFamily("Times New Roman")
+        self.setFont(f)
+        self.setFixedSize(30, 24)
+        self.setToolTip(spec.tip or spec.label)
+        self.clicked.connect(lambda: self.valueChanged.emit(self.isChecked()))
+
+    def set_value(self, v):
+        self.blockSignals(True)
+        self.setChecked(bool(v) and v is not MIXED)
+        self.setStyleSheet("QToolButton { border-style: dashed; }" if v is MIXED else "")
+        self.blockSignals(False)
+
+
 def pair_row(main, second, second_width=88):
-    """Два редактора в одной строке: тип конца + размер."""
+    """Два редактора в одной строке: тип конца + размер (или две кнопки Ж/К)."""
     w = QWidget()
     lay = QHBoxLayout(w)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(3)
+    if getattr(main, "compact", False):
+        lay.addWidget(main)
+        lay.addWidget(second)
+        lay.addStretch(1)
+        return w
     lay.addWidget(main, 3)
     second.setMaximumWidth(second_width)
     lay.addWidget(second, 2)
@@ -405,6 +439,8 @@ class ToggleGrid(QWidget):
 
 def make_editor(spec):
     k = spec.kind
+    if k == "toggle":
+        return ToggleEditor(spec)
     if k == "slider":
         return SliderEditor(spec, default=100 if spec.name == "saturation" else 0)
     if k == "curves":

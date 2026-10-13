@@ -43,6 +43,10 @@ QToolButton#Toggle { background: #34373d; border: 1px solid #44474e; border-radi
     padding: 3px 4px; font-size: 8pt; }
 QToolButton#Toggle:hover { border-color: #5a90c8; }
 QToolButton#Toggle:checked { background: #1f6fbf; border-color: #4aa3ff; color: #ffffff; }
+QToolButton#IconToggle { background: #34373d; border: 1px solid #44474e; border-radius: 3px; color: #c8ccd4;
+    padding: 0px; }
+QToolButton#IconToggle:hover { border-color: #5a90c8; }
+QToolButton#IconToggle:checked { background: #1f6fbf; border-color: #4aa3ff; color: #ffffff; }
 QToolButton#ToggleMaster { background: #34373d; border: 1px solid #44474e; border-radius: 2px; color: #9ba1ab;
     padding: 4px 8px; font-weight: bold; }
 QToolButton#ToggleMaster:checked { background: #1f6fbf; border-color: #4aa3ff; color: #ffffff; }

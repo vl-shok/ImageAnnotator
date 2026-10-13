@@ -53,20 +53,52 @@ def paint_text_box(painter: QPainter, props, box, trect, flags, font, border_col
 
 # =====================================================================
 class TextItem(AnnotationItem):
+    """Текст. pos() — левый верхний угол блока; поворот — вокруг центра блока."""
     TYPE = "text"
     TITLE = "Текст"
+    ROT_HANDLE_PX = 26
     DEFAULTS = {"text": "ТЕКСТ", "font": DEFAULT_FONT, "size": 24, "bold": True, "italic": False,
                 "color": "#ff2020", "align": "left", "bg": True, "bg_color": "#ffffff",
-                "bg_opacity": 0.8, "padding": 4, "opacity": 1.0}
-    PROPS = text_props() + [OPACITY]
+                "bg_opacity": 0.8, "padding": 4, "border": False, "border_color": "#ff2020",
+                "border_width": 2.0, "angle": 0.0, "opacity": 1.0}
+    PROPS = text_props() + [
+        PropSpec("border", "Рамка", "bool", "Рамка"),
+        PropSpec("border_color", "Цвет рамки", "color", "Рамка"),
+        PropSpec("border_width", "Толщина рамки", "float", "Рамка", min=0.5, max=50, step=0.5, suffix=" px"),
+        PropSpec("angle", "Угол поворота", "float", "Геометрия", min=-180, max=180, step=1, suffix="°"),
+        OPACITY,
+    ]
 
     def __init__(self, props=None):
         super().__init__(props)
         self._layout = None
         self._drag = None
 
+    # --------------------------------------------------------- rotation
+    def angle(self):
+        return float(self.props.get("angle", 0) or 0)
+
+    def apply_rotation(self):
+        """Повернуть вокруг центра блока, сохранив положение центра на сцене."""
+        c = self.box().center()
+        before = self.mapToScene(c)
+        self.setTransformOriginPoint(c)
+        self.setRotation(self.angle())
+        after = self.mapToScene(c)
+        if before != after:
+            self.setPos(self.pos() + (before - after))
+
     def props_changed(self):
         self._layout = None
+        self.apply_rotation()
+
+    def apply_dict(self, d, keep_id=True):
+        super().apply_dict(d, keep_id)
+        self._layout = None
+        self.setTransformOriginPoint(self.box().center())
+        self.setRotation(self.angle())
+        pos = d.get("pos", [0, 0])
+        self.setPos(float(pos[0]), float(pos[1]))
 
     def layout(self):
         if self._layout is None:
@@ -88,19 +120,35 @@ class TextItem(AnnotationItem):
         return 1.0
 
     def margin(self):
-        return 4
+        return 4 + (float(self.props.get("border_width", 2)) if self.props.get("border") else 0)
 
     def handles(self):
-        return [self.box().bottomRight()]
+        from . import base
+        b = self.box()
+        return [b.bottomRight(), QPointF(b.center().x(), b.top() - self.ROT_HANDLE_PX / base.VIEW_SCALE)]
+
+    def handle_kinds(self):
+        return ["point", "rot"]
 
     def handle_cursor(self, idx):
-        return Qt.SizeFDiagCursor
+        return Qt.PointingHandCursor if idx == 1 else Qt.SizeFDiagCursor
 
     def begin_handle_drag(self, idx):
         self._drag = (int(self.props["size"]), self.box().height(), self.box().width())
+        return None
 
     def move_handle(self, idx, p, constrain=False, symmetric=False):
-        """Тянем правый нижний угол — меняется размер шрифта."""
+        if idx == 1:
+            # поворот: угол от центра блока к курсору (Shift — шаг 15°)
+            c = self.mapToScene(self.box().center())
+            ps = self.mapToScene(p)
+            a = math.degrees(math.atan2(ps.y() - c.y(), ps.x() - c.x())) + 90.0
+            if constrain:
+                a = round(a / 15.0) * 15.0
+            a = (a + 180.0) % 360.0 - 180.0
+            self.set_prop("angle", round(a, 2))
+            return
+        # правый нижний угол — размер шрифта
         if not self._drag:
             self.begin_handle_drag(idx)
         size0, h0, w0 = self._drag
@@ -115,11 +163,14 @@ class TextItem(AnnotationItem):
         painter.setRenderHint(QPainter.TextAntialiasing)
         self.paint_opacity(painter)
         box, trect, flags, font = self.layout()
-        paint_text_box(painter, self.props, box, trect, flags, font)
+        bc = self.props.get("border_color") if self.props.get("border") else None
+        paint_text_box(painter, self.props, box, trect, flags, font,
+                       border_color=bc, border_w=float(self.props.get("border_width", 2)))
 
     def describe(self):
         t = (self.props.get("text") or "").replace("\n", " ")
-        return f"Текст: {t[:24]}" + ("…" if len(t) > 24 else "")
+        a = self.angle()
+        return f"Текст: {t[:24]}" + ("…" if len(t) > 24 else "") + (f", {a:g}°" if a else "")
 
 
 # =====================================================================

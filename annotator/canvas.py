@@ -481,7 +481,8 @@ class CanvasView(QGraphicsView):
                 hs = it.handles()
                 if "rot" in kinds:
                     ri = kinds.index("rot")
-                    top = it.mapToScene(QPointF(it.rect.center().x(), it.rect.top()))
+                    br = it.outline_path().boundingRect()
+                    top = it.mapToScene(QPointF(br.center().x(), br.top()))
                     pen = QPen(ACCENT, 1)
                     pen.setCosmetic(True)
                     painter.setPen(pen)

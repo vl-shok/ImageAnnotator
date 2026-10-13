@@ -147,7 +147,8 @@ class PropertiesPanel(QScrollArea):
                 ped.valueChanged.connect((lambda name: (lambda v: self.ed.set_prop(name, v)))(spec.pair.name))
                 if hasattr(ped, "committed"):
                     ped.committed.connect(self.ed.bump_session)
-                ped.setToolTip("Размер наконечника")
+                if spec.pair.kind != "toggle":
+                    ped.setToolTip("Размер наконечника")
                 self._editors.append((ped, pget))
                 row = pair_row(ed, ped)
             sec.add_row(spec.label, row)

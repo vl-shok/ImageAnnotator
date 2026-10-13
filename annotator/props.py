@@ -30,6 +30,8 @@ class PropSpec:
         self.suffix = kw.get("suffix", "")
         self.pair = kw.get("pair")          # второй редактор в той же строке (например, размер наконечника)
         self.special = kw.get("special")    # текст для минимального значения (например, «авто»)
+        self.icon = kw.get("icon")          # для kind="toggle": буква на кнопке
+        self.tip = kw.get("tip", "")
 
     def key(self):
         return (self.name, self.kind)
@@ -82,8 +84,8 @@ def text_props(with_text=True):
         PropSpec("font", "Шрифт", "font", S_TEXT),
         PropSpec("size", "Размер", "int", S_TEXT, min=4, max=600, suffix=" px"),
         PropSpec("color", "Цвет", "color", S_TEXT),
-        PropSpec("bold", "Жирный", "bool", S_TEXT),
-        PropSpec("italic", "Курсив", "bool", S_TEXT),
+        PropSpec("bold", "Начертание", "toggle", S_TEXT, icon="B", tip="Жирный",
+                 pair=PropSpec("italic", "Курсив", "toggle", icon="I", tip="Курсив")),
         PropSpec("align", "Выравнивание", "enum", S_TEXT, options=ALIGNS),
         PropSpec("bg", "Подложка", "bool", S_BG),
         PropSpec("bg_color", "Цвет подложки", "color", S_BG),

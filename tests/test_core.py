@@ -410,3 +410,24 @@ def test_dimension_label_far(ed):
     d.set_drag(QPointF(0, 0), QPointF(10, 0))
     d.move_handle(2, QPointF(300, -20))
     assert abs(d.t - 30) < 1e-6 and d.label_point().x() == 300
+
+
+def test_text_rotation_border_roundtrip(ed, tmp_path):
+    t = TextItem({"text": "REMOVE", "border": True})
+    t.setPos(100, 100)
+    ed.add_items([t])
+    c0 = t.mapToScene(t.box().center())
+    ed.sel.set([t])
+    ed.set_prop("angle", 90.0)
+    c1 = t.mapToScene(t.box().center())
+    assert abs(c0.x() - c1.x()) < 1e-6 and abs(c0.y() - c1.y()) < 1e-6
+    assert t.handle_kinds() == ["point", "rot"]
+    corner = t.mapToScene(t.box().topLeft())
+    path = str(tmp_path / "t.iap")
+    ed.save_project(path)
+    e2 = Editor()
+    e2.open_project(path)
+    t2 = e2.doc.items()[0]
+    c2 = t2.mapToScene(t2.box().topLeft())
+    assert abs(c2.x() - corner.x()) < 1e-6 and abs(c2.y() - corner.y()) < 1e-6
+    assert t2.props["border"] is True and t2.rotation() == 90
