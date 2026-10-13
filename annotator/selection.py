@@ -6,7 +6,7 @@ from PySide6.QtCore import QObject, Signal
 from .items import ITEM_CLASSES
 
 
-_SHORT = {"rect": "Прямоуг.", "image": "Картинка", "polyline": "Полилиния", "break": "Разрыв"}
+_SHORT = {"rect": "Прямоуг.", "image": "Картинка", "polyline": "Полилиния", "break": "Разрыв", "magnifier": "Лупа"}
 
 
 class SelectionFilter:

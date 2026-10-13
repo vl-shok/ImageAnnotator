@@ -9,7 +9,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 
 from ..geometry import constrain_angle, dist
-from ..items import (ArrowItem, BreakItem, CalloutItem, DimensionItem, EllipseItem, FreehandItem, LineItem, NumberItem,
+from ..items import (ArrowItem, BreakItem, CalloutItem, DimensionItem, MagnifierItem, EllipseItem, FreehandItem, LineItem, NumberItem,
                      PolygonItem, PolylineItem, RectItem, TextItem)
 from .base import Tool, ToolEvent
 
@@ -490,6 +490,7 @@ def make_tools(editor):
         TwoPointTool(editor, LineItem, "line", "Линия", "L"),
         TwoPointTool(editor, DimensionItem, "dimension", "Размер (расстояние)", "D"),
         TwoPointTool(editor, BreakItem, "break", "Разрыв цепи", "B"),
+        TwoPointTool(editor, MagnifierItem, "magnifier", "Выносной вид (лупа)", "Z", box=True),
         TextTool(editor),
         CalloutTool(editor),
         NumberTool(editor),

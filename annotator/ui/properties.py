@@ -170,10 +170,6 @@ class PropertiesPanel(QScrollArea):
             sec = sections.get("Изображение") or Section("Изображение")
             sec.add_row("Обрезка", self._buttons([("Обрезать (K)", "tool_crop")] +
                                                 ([("Вернуть всё", "image_uncrop")] if it.is_cropped() else [])))
-            from .. import imageops
-            changed = not imageops.color_is_identity(it.color_params())
-            sec.add_row("Цвет", self._buttons([("Коррекция цвета… (изменена)" if changed else "Коррекция цвета…",
-                                                "color")]))
 
         sec = Section("Объект")
         self.lay.addWidget(sec)

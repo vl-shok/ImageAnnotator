@@ -31,6 +31,7 @@ HOTKEYS = [
     ("V", "Выбор"), ("M", "Выделение области фото"), ("K", "Обрезка / размер холста (и вставленного изображения)"), ("A", "Стрелка"), ("L", "Линия"), ("T", "Текст"),
     ("C", "Выноска"), ("N", "Нумерация"), ("R", "Прямоугольник"), ("E", "Эллипс"), ("P", "Полилиния"),
     ("G", "Полигон"), ("F", "Карандаш"), ("D", "Размер (расстояние)"), ("B", "Разрыв цепи"),
+    ("Z", "Выносной вид (лупа): выделите область — рядом появится увеличение"),
     ("Навигация", ""),
     ("Колесо мыши", "Масштаб относительно курсора"), ("ПКМ + движение", "Панорама"),
     ("СКМ + движение вверх/вниз", "Масштаб"), ("Ctrl+0 / двойной клик СКМ", "Вписать"), ("Ctrl+1", "100%"),
@@ -170,7 +171,7 @@ class MainWindow(QMainWindow):
         # инструменты
         self.tool_group = QActionGroup(self)
         self.tool_group.setExclusive(True)
-        icons = {"select": "select", "raster": "raster", "crop": "crop", "dimension": "dimension", "break": "break", "arrow": "arrow", "line": "line", "text": "text",
+        icons = {"select": "select", "raster": "raster", "crop": "crop", "dimension": "dimension", "break": "break", "magnifier": "magnifier", "arrow": "arrow", "line": "line", "text": "text",
                  "callout": "callout", "number": "number", "rect": "rect", "ellipse": "ellipse",
                  "polyline": "polyline", "polygon": "polygon", "freehand": "freehand"}
         for name, tool in ed.tools.items():
@@ -240,7 +241,7 @@ class MainWindow(QMainWindow):
         tb.setOrientation(Qt.Vertical)
         self.addToolBar(Qt.LeftToolBarArea, tb)
         order = ["select", "raster", "crop", None, "arrow", "line", "text", "callout", "number", None,
-                 "rect", "ellipse", "polyline", "polygon", "freehand", None, "dimension", "break"]
+                 "rect", "ellipse", "polyline", "polygon", "freehand", None, "dimension", "break", "magnifier"]
         for n in order:
             if n is None:
                 tb.addSeparator()

@@ -53,6 +53,17 @@ def _draw(name, p: QPainter):
             y0 = {"top": 18, "middle": 28, "bottom": 38}[kind]
             for k, w in enumerate((32, 22)):
                 p.drawLine(QPointF(32 - w / 2, y0 + k * 10), QPointF(32 + w / 2, y0 + k * 10))
+    elif name == "magnifier":
+        p.setPen(_pen(RED, 3))
+        p.drawRect(QRectF(6, 34, 16, 16))
+        pen = _pen(RED, 2)
+        pen.setDashPattern([2, 2])
+        p.setPen(pen)
+        p.drawLine(QPointF(22, 34), QPointF(30, 6))
+        p.drawLine(QPointF(22, 50), QPointF(30, 46))
+        p.setPen(_pen(FG, 3.5))
+        p.setBrush(QColor(120, 170, 220, 90))
+        p.drawRect(QRectF(30, 6, 28, 40))
     elif name == "filter":
         p.setBrush(QColor(FG.red(), FG.green(), FG.blue(), 60))
         p.drawPolygon(QPolygonF([QPointF(8, 10), QPointF(56, 10), QPointF(38, 32), QPointF(38, 54),

@@ -22,7 +22,8 @@ from .widgets import OpacityEditor
 ROLE = Qt.UserRole
 TYPE_ICON = {"text": "text", "line": "line", "arrow": "arrow", "callout": "callout", "number": "number",
              "rect": "rect", "ellipse": "ellipse", "polyline": "polyline", "polygon": "polygon",
-             "freehand": "freehand", "image": "image", "break": "break", "dimension": "dimension"}
+             "freehand": "freehand", "image": "image", "break": "break", "dimension": "dimension",
+             "magnifier": "magnifier"}
 THUMB = QSize(40, 28)
 EYE_CANVAS = QSize(22, 28)
 

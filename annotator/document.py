@@ -46,6 +46,8 @@ class Document(QObject):
 
     def __init__(self):
         super().__init__()
+        from .items.magnifier import MagnifierItem
+        MagnifierItem.source_provider = staticmethod(lambda: self.display_image)
         self.scene = QGraphicsScene()
         self.scene.setItemIndexMethod(QGraphicsScene.NoIndex)
         self.bg_item = BackgroundItem()
@@ -126,6 +128,9 @@ class Document(QObject):
         else:
             self.display_image = imageops.apply_color(self.background, self.color)
         self.bg_item.set_image(self.display_image)
+        for it in self._items:
+            if it.TYPE == "magnifier":
+                it.update()
         self.backgroundChanged.emit()
 
     # ================================================================ layers

@@ -514,3 +514,36 @@ def test_rotated_rect_resize_all_handles_follow_mouse(ed):
             assert abs(ml[0] - dl[0]) < 0.05, (hid, ml, dl)
         if "t" in hid or "b" in hid:
             assert abs(ml[1] - dl[1]) < 0.05, (hid, ml, dl)
+
+
+def test_magnifier(ed, tmp_path):
+    from annotator.items import MagnifierItem
+    from annotator.export import render_image
+    from PySide6.QtGui import QPainter
+    img = QImage(800, 600, QImage.Format_ARGB32_Premultiplied)
+    img.fill(QColor(0, 0, 0))
+    p = QPainter(img)
+    p.fillRect(100, 100, 20, 20, QColor(255, 0, 0))
+    p.end()
+    ed.new_from_image(img)
+    m = MagnifierItem()
+    m.set_drag(QPointF(100, 100), QPointF(120, 120))
+    ed.add_items([m])
+    d = m.dst_rect().translated(m.pos())
+    assert d.width() == 50 and d.left() > 120          # ×2.5, справа от области
+    assert len(m.connector_lines()) == 2
+    out = render_image(ed.doc)
+    c = QColor(out.pixel(int(d.center().x()), int(d.center().y())))
+    assert c.red() > 200 and c.green() < 60               # в виде — увеличенный красный квадрат
+    m.begin_handle_drag(5)
+    m.move_handle(5, m.dst_rect().center() + QPointF(0, 100))
+    assert abs(m.dst_rect().translated(m.pos()).top() - d.top() - 100) < 1e-6
+    ed.sel.set([m])
+    ed.set_prop("shape", "circle")
+    assert len(m.connector_lines()) == 2
+    path = str(tmp_path / "m.iap")
+    ed.save_project(path)
+    e2 = Editor()
+    e2.open_project(path)
+    m2 = e2.doc.items()[0]
+    assert m2.TYPE == "magnifier" and m2.dst_rect() == m.dst_rect()
