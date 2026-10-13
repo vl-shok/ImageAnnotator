@@ -791,6 +791,8 @@ class BoxItem(AnnotationItem):
     def begin_handle_drag(self, idx):
         self._drag_rect = QRectF(self.rect)
         self._drag_anchor = None
+        self._drag_tf = self.sceneTransform()
+        self._drag_inv = self._drag_tf.inverted()[0]
         return None
 
     def _resize_from(self, r0: QRectF, hid: str, p: QPointF, constrain: bool, keep_aspect: bool,
@@ -864,10 +866,13 @@ class BoxItem(AnnotationItem):
             self._rotate_to(p, constrain)
             return
         r0 = self._drag_rect or self.rect
+        if getattr(self, "_drag_inv", None) is not None:
+            p = self._drag_inv.map(self.mapToScene(p))  # в систему координат начала перетаскивания
         hid = self.HANDLE_IDS[idx]
         fixed_local = self._fixed_point(r0, hid, symmetric)
         if self._drag_anchor is None or self._drag_anchor[0] != (hid, symmetric):
-            self._drag_anchor = ((hid, symmetric), self.mapToScene(fixed_local))
+            tf = getattr(self, "_drag_tf", None)
+            self._drag_anchor = ((hid, symmetric), tf.map(fixed_local) if tf is not None else self.mapToScene(fixed_local))
         new = self._resize_from(r0, hid, p, constrain, keep_aspect=False, symmetric=symmetric)
         self._apply_rect(new, fixed_local, self._drag_anchor[1])
 

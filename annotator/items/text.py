@@ -169,6 +169,10 @@ class TextItem(AnnotationItem):
     def begin_handle_drag(self, idx):
         self._drag = QRectF(self.box())
         self._drag_anchor = None
+        # система координат на момент начала перетаскивания: во время перетаскивания pos()
+        # смещается, поэтому точку мыши пересчитываем в исходную систему
+        self._drag_tf = self.sceneTransform()
+        self._drag_inv = self._drag_tf.inverted()[0]
         return None
 
     def move_handle(self, idx, p, constrain=False, symmetric=False):
@@ -184,6 +188,8 @@ class TextItem(AnnotationItem):
             return
         # ручки рамки — свободно меняем ширину/высоту блока (Alt — от центра)
         r0 = self._drag if isinstance(self._drag, QRectF) else QRectF(self.box())
+        if getattr(self, "_drag_inv", None) is not None:
+            p = self._drag_inv.map(self.mapToScene(p))
         hid = self.HANDLE_IDS[idx]
         if symmetric:
             fixed_local = r0.center()
@@ -192,7 +198,8 @@ class TextItem(AnnotationItem):
             fy = r0.center().y() if hid in ("l", "r") else (r0.bottom() if "t" in hid else r0.top())
             fixed_local = QPointF(fx, fy)
         if getattr(self, "_drag_anchor", None) is None or self._drag_anchor[0] != (hid, symmetric):
-            self._drag_anchor = ((hid, symmetric), self.mapToScene(fixed_local))
+            tf = getattr(self, "_drag_tf", None)
+            self._drag_anchor = ((hid, symmetric), tf.map(fixed_local) if tf is not None else self.mapToScene(fixed_local))
         fixed_scene = self._drag_anchor[1]
         if symmetric:
             c = r0.center()

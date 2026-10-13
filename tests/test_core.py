@@ -453,3 +453,64 @@ def test_text_free_box_and_align(ed):
     assert abs(right.x() - r2.x()) < 1e-6
     t.set_prop("auto_size", True)
     assert t.box().width() < 200
+
+
+def _drag_handle(item, idx, start_scene, end_scene, steps=12, alt=False):
+    """Имитация перетаскивания ручки мышью: на каждом шаге точка мыши переводится
+    в ТЕКУЩИЕ локальные координаты объекта (как делает SelectTool)."""
+    item.begin_handle_drag(idx)
+    for k in range(1, steps + 1):
+        sp = start_scene + (end_scene - start_scene) * (k / steps)
+        item.move_handle(idx, item.mapFromScene(sp), symmetric=alt)
+
+
+def test_text_resize_all_handles_follow_mouse(ed):
+    for angle in (0.0, 30.0):
+        for idx in range(8):
+            t = TextItem({"text": "REMOVE"})
+            t.setPos(200, 200)
+            ed.add_items([t])
+            t.begin_handle_drag(4)
+            t.move_handle(4, QPointF(200, 100))
+            t.set_prop("angle", angle)
+            h0 = t.mapToScene(t.handles()[idx])
+            d = QPointF(37, 23)
+            _drag_handle(t, idx, h0, h0 + d)
+            h1 = t.mapToScene(t.handles()[idx])
+            # ручка должна оказаться там же, где мышь (по осям, которые она двигает)
+            hid = t.HANDLE_IDS[idx]
+            moved = h1 - h0
+            # проверка в системе координат объекта
+            import math
+            a = math.radians(angle)
+            ux, uy = math.cos(a), math.sin(a)
+            dl = (d.x() * ux + d.y() * uy, -d.x() * uy + d.y() * ux)
+            ml = (moved.x() * ux + moved.y() * uy, -moved.x() * uy + moved.y() * ux)
+            if "l" in hid or "r" in hid:
+                assert abs(ml[0] - dl[0]) < 0.05, (angle, hid, ml, dl)
+            if "t" in hid or "b" in hid:
+                assert abs(ml[1] - dl[1]) < 0.05, (angle, hid, ml, dl)
+
+
+def test_rotated_rect_resize_all_handles_follow_mouse(ed):
+    import math
+    for idx in range(8):
+        r = RectItem()
+        r.set_drag(QPointF(100, 100), QPointF(300, 220))
+        ed.add_items([r])
+        ed.sel.set([r])
+        ed.set_prop("angle", 25.0)
+        h0 = r.mapToScene(r.handles()[idx])
+        d = QPointF(-31, 17)
+        _drag_handle(r, idx, h0, h0 + d)
+        h1 = r.mapToScene(r.handles()[idx])
+        a = math.radians(25.0)
+        ux, uy = math.cos(a), math.sin(a)
+        dl = (d.x() * ux + d.y() * uy, -d.x() * uy + d.y() * ux)
+        mv = h1 - h0
+        ml = (mv.x() * ux + mv.y() * uy, -mv.x() * uy + mv.y() * ux)
+        hid = r.HANDLE_IDS[idx]
+        if "l" in hid or "r" in hid:
+            assert abs(ml[0] - dl[0]) < 0.05, (hid, ml, dl)
+        if "t" in hid or "b" in hid:
+            assert abs(ml[1] - dl[1]) < 0.05, (hid, ml, dl)
