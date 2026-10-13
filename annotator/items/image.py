@@ -42,12 +42,8 @@ class ImageItem(BoxItem):
         PropSpec("border_color", "Цвет рамки", "color", "Изображение"),
         PropSpec("border_width", "Толщина рамки", "float", "Изображение", min=0.5, max=50, step=0.5, suffix=" px"),
         OPACITY,
-        PropSpec("brightness", "Яркость", "slider", "Коррекция", min=-100, max=100),
-        PropSpec("contrast", "Контраст", "slider", "Коррекция", min=-100, max=100),
-        PropSpec("saturation", "Насыщенность", "slider", "Коррекция", min=0, max=200, suffix="%"),
-        PropSpec("temperature", "Температура", "slider", "Коррекция", min=-100, max=100),
-        PropSpec("curves", "Кривые", "curves", "Коррекция"),
     ]
+    # коррекция цвета (brightness/contrast/saturation/temperature/curves) — в окне «Коррекция цвета…»
 
     def __init__(self, image: QImage | None = None, rect: QRectF | None = None, props=None):
         if image is not None and rect is None:

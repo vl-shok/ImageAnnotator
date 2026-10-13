@@ -560,6 +560,7 @@ class MainWindow(QMainWindow):
                 item.props.update(before)
                 ed.set_item_color(item, before, after)
                 ed.doc.itemsModified.emit()
+                ed.sel.changed.emit()  # обновить подпись кнопки в свойствах
             return
         if ed.doc.background is None:
             return
