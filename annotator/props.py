@@ -48,6 +48,7 @@ def cap_size(name):
 
 
 ALIGNS = [("left", "Влево"), ("center", "По центру"), ("right", "Вправо")]
+VALIGNS = [("top", "Вверх"), ("middle", "По центру"), ("bottom", "Вниз")]
 
 S_LINE = "Линия"
 S_FILL = "Заливка"
@@ -76,7 +77,7 @@ def fill_props():
     ]
 
 
-def text_props(with_text=True):
+def text_props(with_text=True, valign=False):
     out = []
     if with_text:
         out.append(PropSpec("text", "Текст", "text", S_TEXT))
@@ -86,7 +87,8 @@ def text_props(with_text=True):
         PropSpec("color", "Цвет", "color", S_TEXT),
         PropSpec("bold", "Начертание", "toggle", S_TEXT, icon="B", tip="Жирный",
                  pair=PropSpec("italic", "Курсив", "toggle", icon="I", tip="Курсив")),
-        PropSpec("align", "Выравнивание", "enum", S_TEXT, options=ALIGNS),
+        PropSpec("align", "Выравнивание", "align", S_TEXT, options=ALIGNS,
+                 pair=PropSpec("valign", "По вертикали", "align", options=VALIGNS) if valign else None),
         PropSpec("bg", "Подложка", "bool", S_BG),
         PropSpec("bg_color", "Цвет подложки", "color", S_BG),
         PropSpec("bg_opacity", "Прозр. подложки", "opacity", S_BG),

@@ -219,6 +219,39 @@ class ToggleEditor(QToolButton):
         self.blockSignals(False)
 
 
+class AlignEditor(QWidget):
+    """Три кнопки-иконки выравнивания (влево/центр/вправо или верх/центр/низ)."""
+    valueChanged = Signal(object)
+    compact = True
+
+    def __init__(self, spec, parent=None):
+        super().__init__(parent)
+        from .icons import icon
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        self.buttons = {}
+        for value, label in spec.options:
+            b = QToolButton()
+            b.setObjectName("IconToggle")
+            b.setCheckable(True)
+            b.setIcon(icon("al_" + value))
+            b.setIconSize(QSize(16, 16))
+            b.setFixedSize(28, 24)
+            b.setToolTip(f"{spec.label}: {label}")
+            b.clicked.connect((lambda v: (lambda: self._pick(v)))(value))
+            lay.addWidget(b)
+            self.buttons[value] = b
+
+    def _pick(self, v):
+        self.set_value(v)
+        self.valueChanged.emit(v)
+
+    def set_value(self, v):
+        for k, b in self.buttons.items():
+            b.setChecked(k == v)
+
+
 def pair_row(main, second, second_width=88):
     """Два редактора в одной строке: тип конца + размер (или две кнопки Ж/К)."""
     w = QWidget()
@@ -227,6 +260,8 @@ def pair_row(main, second, second_width=88):
     lay.setSpacing(3)
     if getattr(main, "compact", False):
         lay.addWidget(main)
+        if isinstance(second, AlignEditor):
+            lay.addSpacing(10)
         lay.addWidget(second)
         lay.addStretch(1)
         return w
@@ -441,6 +476,8 @@ def make_editor(spec):
     k = spec.kind
     if k == "toggle":
         return ToggleEditor(spec)
+    if k == "align":
+        return AlignEditor(spec)
     if k == "slider":
         return SliderEditor(spec, default=100 if spec.name == "saturation" else 0)
     if k == "curves":

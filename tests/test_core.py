@@ -421,7 +421,7 @@ def test_text_rotation_border_roundtrip(ed, tmp_path):
     ed.set_prop("angle", 90.0)
     c1 = t.mapToScene(t.box().center())
     assert abs(c0.x() - c1.x()) < 1e-6 and abs(c0.y() - c1.y()) < 1e-6
-    assert t.handle_kinds() == ["point", "rot"]
+    assert t.handle_kinds() == ["box"] * 8 + ["rot"]
     corner = t.mapToScene(t.box().topLeft())
     path = str(tmp_path / "t.iap")
     ed.save_project(path)
@@ -431,3 +431,25 @@ def test_text_rotation_border_roundtrip(ed, tmp_path):
     c2 = t2.mapToScene(t2.box().topLeft())
     assert abs(c2.x() - corner.x()) < 1e-6 and abs(c2.y() - corner.y()) < 1e-6
     assert t2.props["border"] is True and t2.rotation() == 90
+
+
+def test_text_free_box_and_align(ed):
+    t = TextItem({"text": "REMOVE"})
+    t.setPos(100, 100)
+    ed.add_items([t])
+    assert t.props["align"] == "center" and t.props["valign"] == "middle"
+    tl = t.mapToScene(t.box().topLeft())
+    t.begin_handle_drag(4)  # правый нижний угол
+    t.move_handle(4, QPointF(300, 150))
+    assert t.props["auto_size"] is False and t.box().width() == 300 and t.box().height() == 150
+    tl2 = t.mapToScene(t.box().topLeft())
+    assert abs(tl.x() - tl2.x()) < 1e-6 and abs(tl.y() - tl2.y()) < 1e-6
+    # левая сторона: правая остаётся на месте
+    right = t.mapToScene(t.box().topRight())
+    t.begin_handle_drag(7)
+    t.move_handle(7, QPointF(-50, 75))
+    assert t.box().width() == 350
+    r2 = t.mapToScene(t.box().topRight())
+    assert abs(right.x() - r2.x()) < 1e-6
+    t.set_prop("auto_size", True)
+    assert t.box().width() < 200

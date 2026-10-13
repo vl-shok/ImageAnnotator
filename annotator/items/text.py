@@ -23,16 +23,24 @@ def make_font(props) -> QFont:
     return f
 
 
-def layout_text(props):
-    """Возвращает (box, text_rect, flags) в локальных координатах (box начинается в 0,0)."""
+VALIGN_FLAGS = {"top": Qt.AlignTop, "middle": Qt.AlignVCenter, "bottom": Qt.AlignBottom}
+
+
+def layout_text(props, fixed=None):
+    """Возвращает (box, text_rect, flags, font) в локальных координатах (box начинается в 0,0).
+    fixed=(w, h) — размер блока задан пользователем (текст переносится по словам)."""
     font = make_font(props)
     fm = QFontMetricsF(font)
     text = props.get("text", "") or " "
-    flags = ALIGN_FLAGS.get(props.get("align", "left"), Qt.AlignLeft) | Qt.AlignTop | Qt.TextExpandTabs
+    pad = float(props.get("padding", 4))
+    flags = (ALIGN_FLAGS.get(props.get("align", "left"), Qt.AlignLeft)
+             | VALIGN_FLAGS.get(props.get("valign", "top"), Qt.AlignTop) | Qt.TextExpandTabs)
+    if fixed is not None:
+        box = QRectF(0, 0, max(4.0, fixed[0]), max(4.0, fixed[1]))
+        return box, box.adjusted(pad, pad, -pad, -pad), flags | Qt.TextWordWrap, font
     br = fm.boundingRect(QRectF(0, 0, 1e6, 1e6), int(Qt.AlignLeft | Qt.AlignTop | Qt.TextExpandTabs), text)
     w = br.width() + (fm.averageCharWidth() * 0.3 if props.get("italic") else 0) + 1
     h = max(br.height(), fm.height())
-    pad = float(props.get("padding", 4))
     box = QRectF(0, 0, w + 2 * pad, h + 2 * pad)
     return box, box.adjusted(pad, pad, -pad, -pad), flags, font
 
@@ -53,15 +61,19 @@ def paint_text_box(painter: QPainter, props, box, trect, flags, font, border_col
 
 # =====================================================================
 class TextItem(AnnotationItem):
-    """Текст. pos() — левый верхний угол блока; поворот — вокруг центра блока."""
+    """Текст. pos() — левый верхний угол блока; поворот — вокруг центра блока.
+    Размер блока — автоматически по тексту или задан вручную (ручки по краям рамки)."""
+    HANDLE_IDS = ("tl", "t", "tr", "r", "br", "b", "bl", "l")
     TYPE = "text"
     TITLE = "Текст"
     ROT_HANDLE_PX = 26
     DEFAULTS = {"text": "ТЕКСТ", "font": DEFAULT_FONT, "size": 24, "bold": True, "italic": False,
-                "color": "#ff2020", "align": "left", "bg": True, "bg_color": "#ffffff",
+                "color": "#ff2020", "align": "center", "valign": "middle", "bg": True, "bg_color": "#ffffff",
                 "bg_opacity": 0.8, "padding": 4, "border": False, "border_color": "#ff2020",
-                "border_width": 2.0, "angle": 0.0, "opacity": 1.0}
-    PROPS = text_props() + [
+                "border_width": 2.0, "angle": 0.0, "auto_size": True, "box_w": 0.0, "box_h": 0.0,
+                "opacity": 1.0}
+    PROPS = text_props(valign=True) + [
+        PropSpec("auto_size", "Размер по тексту", "bool", "Рамка"),
         PropSpec("border", "Рамка", "bool", "Рамка"),
         PropSpec("border_color", "Цвет рамки", "color", "Рамка"),
         PropSpec("border_width", "Толщина рамки", "float", "Рамка", min=0.5, max=50, step=0.5, suffix=" px"),
@@ -100,9 +112,15 @@ class TextItem(AnnotationItem):
         pos = d.get("pos", [0, 0])
         self.setPos(float(pos[0]), float(pos[1]))
 
+    def fixed_size(self):
+        p = self.props
+        if p.get("auto_size", True) or not p.get("box_w") or not p.get("box_h"):
+            return None
+        return float(p["box_w"]), float(p["box_h"])
+
     def layout(self):
         if self._layout is None:
-            self._layout = layout_text(self.props)
+            self._layout = layout_text(self.props, self.fixed_size())
         return self._layout
 
     def box(self) -> QRectF:
@@ -125,20 +143,36 @@ class TextItem(AnnotationItem):
     def handles(self):
         from . import base
         b = self.box()
-        return [b.bottomRight(), QPointF(b.center().x(), b.top() - self.ROT_HANDLE_PX / base.VIEW_SCALE)]
+        c = b.center()
+        hs = [b.topLeft(), QPointF(c.x(), b.top()), b.topRight(), QPointF(b.right(), c.y()),
+              b.bottomRight(), QPointF(c.x(), b.bottom()), b.bottomLeft(), QPointF(b.left(), c.y())]
+        hs.append(QPointF(c.x(), b.top() - self.ROT_HANDLE_PX / base.VIEW_SCALE))
+        return hs
 
     def handle_kinds(self):
-        return ["point", "rot"]
+        return ["box"] * 8 + ["rot"]
 
     def handle_cursor(self, idx):
-        return Qt.PointingHandCursor if idx == 1 else Qt.SizeFDiagCursor
+        if idx == 8:
+            return Qt.PointingHandCursor
+        hid = self.HANDLE_IDS[idx]
+        diag = {"tl": 135, "br": 135, "tr": 45, "bl": 45, "t": 90, "b": 90, "l": 0, "r": 0}[hid]
+        a = (diag - self.angle()) % 180
+        if a < 22.5 or a >= 157.5:
+            return Qt.SizeHorCursor
+        if a < 67.5:
+            return Qt.SizeBDiagCursor
+        if a < 112.5:
+            return Qt.SizeVerCursor
+        return Qt.SizeFDiagCursor
 
     def begin_handle_drag(self, idx):
-        self._drag = (int(self.props["size"]), self.box().height(), self.box().width())
+        self._drag = QRectF(self.box())
+        self._drag_anchor = None
         return None
 
     def move_handle(self, idx, p, constrain=False, symmetric=False):
-        if idx == 1:
+        if idx == 8:
             # поворот: угол от центра блока к курсору (Shift — шаг 15°)
             c = self.mapToScene(self.box().center())
             ps = self.mapToScene(p)
@@ -148,12 +182,55 @@ class TextItem(AnnotationItem):
             a = (a + 180.0) % 360.0 - 180.0
             self.set_prop("angle", round(a, 2))
             return
-        # правый нижний угол — размер шрифта
-        if not self._drag:
-            self.begin_handle_drag(idx)
-        size0, h0, w0 = self._drag
-        f = max(p.y() / max(h0, 1), p.x() / max(w0, 1)) if not constrain else p.y() / max(h0, 1)
-        self.set_prop("size", int(max(4, min(600, round(size0 * max(0.05, f))))))
+        # ручки рамки — свободно меняем ширину/высоту блока (Alt — от центра)
+        r0 = self._drag if isinstance(self._drag, QRectF) else QRectF(self.box())
+        hid = self.HANDLE_IDS[idx]
+        if symmetric:
+            fixed_local = r0.center()
+        else:
+            fx = r0.center().x() if hid in ("t", "b") else (r0.right() if "l" in hid else r0.left())
+            fy = r0.center().y() if hid in ("l", "r") else (r0.bottom() if "t" in hid else r0.top())
+            fixed_local = QPointF(fx, fy)
+        if getattr(self, "_drag_anchor", None) is None or self._drag_anchor[0] != (hid, symmetric):
+            self._drag_anchor = ((hid, symmetric), self.mapToScene(fixed_local))
+        fixed_scene = self._drag_anchor[1]
+        if symmetric:
+            c = r0.center()
+            hw, hh = r0.width() / 2, r0.height() / 2
+            if "l" in hid or "r" in hid:
+                hw = abs(p.x() - c.x())
+            if "t" in hid or "b" in hid:
+                hh = abs(p.y() - c.y())
+            new = QRectF(c.x() - hw, c.y() - hh, 2 * hw, 2 * hh)
+        else:
+            l, t_, r, b = r0.left(), r0.top(), r0.right(), r0.bottom()
+            if "l" in hid:
+                l = p.x()
+            if "r" in hid:
+                r = p.x()
+            if "t" in hid:
+                t_ = p.y()
+            if "b" in hid:
+                b = p.y()
+            new = QRectF(QPointF(l, t_), QPointF(r, b)).normalized()
+        w, h = max(10.0, new.width()), max(10.0, new.height())
+        self.prepareGeometryChange()
+        self.props["auto_size"] = False
+        self.props["box_w"] = round(w, 2)
+        self.props["box_h"] = round(h, 2)
+        self._layout = None
+        # неподвижная точка в новых локальных координатах (блок всегда начинается в 0,0)
+        fixed_new = fixed_local - new.topLeft()
+        self.setTransformOriginPoint(self.box().center())
+        self.setRotation(self.angle())
+        self.setPos(self.pos() + (fixed_scene - self.mapToScene(fixed_new)))
+        self.update()
+
+    def set_prop(self, name, value):
+        if name == "auto_size" and not value and not self.props.get("box_w"):
+            b = self.box()  # «зафиксировать» текущий размер
+            self.props["box_w"], self.props["box_h"] = round(b.width(), 2), round(b.height(), 2)
+        super().set_prop(name, value)
 
     def snap_points(self):
         return rect_snap_points(self.box())

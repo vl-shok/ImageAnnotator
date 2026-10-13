@@ -39,6 +39,20 @@ def _draw(name, p: QPainter):
         p.setBrush(RED)
         p.drawPolygon(QPolygonF([QPointF(10, 54), QPointF(38, 30), QPointF(32, 24), QPointF(54, 10),
                                  QPointF(42, 34), QPointF(36, 28), QPointF(13, 57)]))
+    elif name.startswith("al_"):
+        p.setPen(_pen(FG, 5))
+        kind = name[3:]
+        if kind in ("left", "center", "right"):
+            for y, w in ((14, 44), (26, 30), (38, 44), (50, 26)):
+                x = {"left": 10, "center": 32 - w / 2, "right": 54 - w}[kind]
+                p.drawLine(QPointF(x, y), QPointF(x + w, y))
+        else:
+            p.setPen(_pen(QColor(120, 125, 135), 3))
+            p.drawRect(QRectF(8, 8, 48, 48))
+            p.setPen(_pen(FG, 5))
+            y0 = {"top": 18, "middle": 28, "bottom": 38}[kind]
+            for k, w in enumerate((32, 22)):
+                p.drawLine(QPointF(32 - w / 2, y0 + k * 10), QPointF(32 + w / 2, y0 + k * 10))
     elif name == "filter":
         p.setBrush(QColor(FG.red(), FG.green(), FG.blue(), 60))
         p.drawPolygon(QPolygonF([QPointF(8, 10), QPointF(56, 10), QPointF(38, 32), QPointF(38, 54),
