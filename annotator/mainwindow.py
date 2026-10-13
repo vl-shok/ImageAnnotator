@@ -281,7 +281,7 @@ class MainWindow(QMainWindow):
         ll.addWidget(self.layers, 1)
         split.addWidget(self.props)
         split.addWidget(lw)
-        split.setStretchFactor(0, 3)
+        split.setStretchFactor(0, 5)
         split.setStretchFactor(1, 2)
         split.setChildrenCollapsible(False)
         self.split = split
@@ -709,6 +709,12 @@ class MainWindow(QMainWindow):
         st = s.value("state")
         if st is not None:
             self.restoreState(st)
+        sp = s.value("split_v2")
+        if sp is not None:
+            self.split.restoreState(sp)
+        else:
+            # по умолчанию свойствам — ~72% высоты, слоям — остальное
+            QTimer.singleShot(0, self._default_split)
         try:
             styles.load_styles(json.loads(s.value("styles", "{}")))
         except Exception:
@@ -722,10 +728,15 @@ class MainWindow(QMainWindow):
             sn.kinds = set(kinds)
         self.ed.snapChanged.emit()
 
+    def _default_split(self):
+        h = max(400, self.split.height())
+        self.split.setSizes([int(h * 0.72), int(h * 0.28)])
+
     def _save_settings(self):
         s = self.settings
         s.setValue("geometry", self.saveGeometry())
         s.setValue("state", self.saveState())
+        s.setValue("split_v2", self.split.saveState())
         s.setValue("styles", json.dumps(styles.all_styles()))
         s.setValue("recent_colors", widgets.RECENT)
         s.setValue("snap_enabled", self.ed.snap.enabled)
