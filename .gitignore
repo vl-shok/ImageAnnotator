@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Программа
+error.log
+*.iap.tmp
+
+# Системные
+Thumbs.db
+desktop.ini
+.DS_Store
+.idea/
+.vscode/
