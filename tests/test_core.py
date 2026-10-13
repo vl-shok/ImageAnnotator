@@ -547,3 +547,19 @@ def test_magnifier(ed, tmp_path):
     e2.open_project(path)
     m2 = e2.doc.items()[0]
     assert m2.TYPE == "magnifier" and m2.dst_rect() == m.dst_rect()
+
+
+def test_magnifier_center_handle_follows_mouse(ed):
+    from annotator.items import MagnifierItem
+    m = MagnifierItem()
+    m.set_drag(QPointF(100, 100), QPointF(140, 130))
+    ed.add_items([m])
+    c0 = m.mapToScene(m.handles()[4])
+    _drag_handle(m, 4, c0, c0 + QPointF(60, -25), steps=15)
+    c1 = m.mapToScene(m.handles()[4])
+    assert abs(c1.x() - c0.x() - 60) < 1e-6 and abs(c1.y() - c0.y() + 25) < 1e-6
+    for idx in range(4):
+        h0 = m.mapToScene(m.handles()[idx])
+        _drag_handle(m, idx, h0, h0 + QPointF(7, 5), steps=10)
+        h1 = m.mapToScene(m.handles()[idx])
+        assert abs(h1.x() - h0.x() - 7) < 1e-6 and abs(h1.y() - h0.y() - 5) < 1e-6

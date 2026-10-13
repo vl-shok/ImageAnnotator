@@ -235,13 +235,17 @@ class AlignEditor(QWidget):
             b = QToolButton()
             b.setObjectName("IconToggle")
             b.setCheckable(True)
-            b.setIcon(icon("al_" + value))
+            b.setIcon(icon((spec.icon or "al_") + value))
             b.setIconSize(QSize(16, 16))
             b.setFixedSize(28, 24)
             b.setToolTip(f"{spec.label}: {label}")
+            if spec.icon:
+                b.setFixedSize(30, 26)
+                b.setIconSize(QSize(18, 18))
             b.clicked.connect((lambda v: (lambda: self._pick(v)))(value))
             lay.addWidget(b)
             self.buttons[value] = b
+        lay.addStretch(1)
 
     def _pick(self, v):
         self.set_value(v)

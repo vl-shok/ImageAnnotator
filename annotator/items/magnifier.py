@@ -47,7 +47,7 @@ class MagnifierItem(AnnotationItem):
                 "connectors": True, "line_style": "dash", "opacity": 1.0}
     PROPS = [
         PropSpec("zoom", "Увеличение", "float", S_MAG, min=1.1, max=20, step=0.5, suffix="×"),
-        PropSpec("shape", "Форма", "enum", S_MAG, options=SHAPES),
+        PropSpec("shape", "Форма", "align", S_MAG, options=SHAPES, icon="shp_"),
         PropSpec("color", "Цвет рамок", "color", S_MAG),
         PropSpec("width", "Толщина", "float", S_MAG, min=0.5, max=40, step=0.5, suffix=" px"),
         PropSpec("connectors", "Линии-выноски", "bool", S_MAG),
@@ -203,13 +203,14 @@ class MagnifierItem(AnnotationItem):
         return Qt.SizeFDiagCursor if idx in (0, 2, 6) else Qt.SizeBDiagCursor
 
     def begin_handle_drag(self, idx):
-        self._drag = (QRectF(self.src_rect()), QPointF(self.dst), self.zoom(), QRectF(self.dst_rect()))
+        self._drag = (QRectF(self.src_rect()), QPointF(self.dst), self.zoom(), QRectF(self.dst_rect()),
+                      QRectF(self.src))
         return None
 
     def move_handle(self, idx, p, constrain=False, symmetric=False):
         if self._drag is None:
             self.begin_handle_drag(idx)
-        s0, d0, z0, dr0 = self._drag
+        s0, d0, z0, dr0, raw0 = self._drag
         self.prepareGeometryChange()
         if idx < 4:
             opp = [s0.bottomRight(), s0.bottomLeft(), s0.topLeft(), s0.topRight()][idx]
@@ -227,8 +228,9 @@ class MagnifierItem(AnnotationItem):
                 sr = self.src_rect()
                 self.dst = QPointF(c.x() - sr.width() * k / 2, c.y() - sr.height() * k / 2)
         elif idx == 4:
+            # сдвиг считается от положения на момент нажатия (а не накапливается)
             c = s0.center()
-            self.src = QRectF(self.src).translated(p.x() - c.x(), p.y() - c.y())
+            self.src = QRectF(raw0).translated(p.x() - c.x(), p.y() - c.y())
         elif idx == 5:
             c = dr0.center()
             self.dst = QPointF(d0.x() + p.x() - c.x(), d0.y() + p.y() - c.y())

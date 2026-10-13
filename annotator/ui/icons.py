@@ -54,16 +54,21 @@ def _draw(name, p: QPainter):
             for k, w in enumerate((32, 22)):
                 p.drawLine(QPointF(32 - w / 2, y0 + k * 10), QPointF(32 + w / 2, y0 + k * 10))
     elif name == "magnifier":
-        p.setPen(_pen(RED, 3))
-        p.drawRect(QRectF(6, 34, 16, 16))
-        pen = _pen(RED, 2)
-        pen.setDashPattern([2, 2])
-        p.setPen(pen)
-        p.drawLine(QPointF(22, 34), QPointF(30, 6))
-        p.drawLine(QPointF(22, 50), QPointF(30, 46))
-        p.setPen(_pen(FG, 3.5))
+        # лупа: линза + ручка
+        p.setPen(_pen(FG, 7))
+        p.drawLine(QPointF(40, 40), QPointF(57, 57))
+        p.setPen(_pen(FG, 4.5))
         p.setBrush(QColor(120, 170, 220, 90))
-        p.drawRect(QRectF(30, 6, 28, 40))
+        p.drawEllipse(QPointF(26, 26), 18, 18)
+        p.setPen(_pen(QColor(255, 255, 255, 170), 3))
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(QRectF(15, 15, 22, 22), 100 * 16, 70 * 16)
+    elif name == "shp_rect":
+        p.setPen(_pen(FG, 5))
+        p.drawRect(QRectF(12, 12, 40, 40))
+    elif name == "shp_circle":
+        p.setPen(_pen(FG, 5))
+        p.drawEllipse(QPointF(32, 32), 21, 21)
     elif name == "filter":
         p.setBrush(QColor(FG.red(), FG.green(), FG.blue(), 60))
         p.drawPolygon(QPolygonF([QPointF(8, 10), QPointF(56, 10), QPointF(38, 32), QPointF(38, 54),
