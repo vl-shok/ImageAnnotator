@@ -29,6 +29,13 @@ class PathItem(AnnotationItem):
     def geom_from_dict(self, d):
         self.points = [QPointF(float(x), float(y)) for x, y in d.get("points", [])]
 
+    def rotate_geometry(self, f):
+        self.prepareGeometryChange()
+        self.points = [f(p) for p in self.points]
+        if getattr(self, "ctrl", None) is not None:
+            self.ctrl = f(self.ctrl)
+        return True
+
     # creation helper (две точки в координатах сцены)
     def set_drag(self, p0: QPointF, p1: QPointF, constrain=False, center=False):
         self.prepareGeometryChange()
@@ -704,6 +711,12 @@ class BoxItem(AnnotationItem):
     # --------------------------------------------------------- rotation
     def angle(self) -> float:
         return float(self.props.get("angle", 0) or 0) if self.ROTATABLE else 0.0
+
+    def uses_angle(self):
+        return self.ROTATABLE
+
+    def rotation_pivot(self):
+        return self.rect.center()
 
     def apply_rotation(self):
         """Повернуть вокруг центра, сохранив положение центра на сцене."""

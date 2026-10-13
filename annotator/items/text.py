@@ -90,6 +90,9 @@ class TextItem(AnnotationItem):
     def angle(self):
         return float(self.props.get("angle", 0) or 0)
 
+    def rotation_pivot(self):
+        return self.box().center()
+
     def apply_rotation(self):
         """Повернуть вокруг центра блока, сохранив положение центра на сцене."""
         c = self.box().center()
@@ -301,6 +304,14 @@ class CalloutItem(AnnotationItem):
     def box(self):
         return self.layout()[0]
 
+    def rotation_pivot(self):
+        return self.box().center()
+
+    def rotate_geometry(self, f):
+        self.prepareGeometryChange()
+        self.tip = f(self.tip)
+        return True
+
     def anchor(self) -> QPointF | None:
         b = self.box()
         if b.contains(self.tip):
@@ -424,6 +435,15 @@ class NumberItem(AnnotationItem):
 
     def radius(self):
         return float(self.props.get("size", 32)) / 2
+
+    def rotation_pivot(self):
+        return QPointF(0, 0)
+
+    def rotate_geometry(self, f):
+        self.prepareGeometryChange()
+        if self.tip is not None:
+            self.tip = f(self.tip)
+        return True
 
     def has_leader(self):
         return bool(self.props.get("leader")) and self.tip is not None

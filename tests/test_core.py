@@ -563,3 +563,40 @@ def test_magnifier_center_handle_follows_mouse(ed):
         _drag_handle(m, idx, h0, h0 + QPointF(7, 5), steps=10)
         h1 = m.mapToScene(m.handles()[idx])
         assert abs(h1.x() - h0.x() - 7) < 1e-6 and abs(h1.y() - h0.y() - 5) < 1e-6
+
+
+def test_space_rotation_45(ed):
+    import math
+    from annotator.items.dimension import DimensionItem
+    # линия: поворот вокруг своего центра, по часовой (+45) и обратно
+    a = line((100, 100), (200, 100))
+    ed.add_items([a])
+    ed.sel.set([a])
+    ed.rotate_selected(45)
+    p0, p1 = a.scene_points()
+    assert math.isclose(p0.x() + p1.x(), 300, abs_tol=1e-6) and math.isclose(p0.y() + p1.y(), 200, abs_tol=1e-6)
+    assert p1.y() > p0.y()          # по часовой на экране: правый конец ушёл вниз
+    ed.rotate_selected(-45)
+    p0, p1 = a.scene_points()
+    assert math.isclose(p0.x(), 100, abs_tol=1e-6) and math.isclose(p1.y(), 100, abs_tol=1e-6)
+    ed.undo.undo()
+    ed.undo.undo()
+    # прямоугольник и текст: меняется свойство angle, центр на месте
+    r = RectItem()
+    r.set_drag(QPointF(10, 10), QPointF(110, 60))
+    t = TextItem(); t.setPos(300, 300)
+    ed.add_items([r]); ed.add_items([t])
+    for it in (r, t):
+        ed.sel.set([it])
+        c = it.content_rect().center()
+        for _ in range(5):
+            ed.rotate_selected(45)
+        assert it.props["angle"] == -135
+        assert math.isclose(it.content_rect().center().x(), c.x(), abs_tol=1e-3)
+    # размер
+    d = DimensionItem()
+    d.set_drag(QPointF(0, 0), QPointF(100, 0))
+    ed.add_items([d]); ed.sel.set([d])
+    ed.rotate_selected(-90)
+    sa, sb = d.mapToScene(d.a), d.mapToScene(d.b)
+    assert math.isclose(sa.x(), sb.x(), abs_tol=1e-6)

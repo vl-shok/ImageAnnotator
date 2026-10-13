@@ -171,6 +171,14 @@ def draw_line_with_caps(painter, pts, color, width, style, start_cap, end_cap, c
         painter.drawEllipse(p, r, r)
 
 
+def rotate_point(p: QPointF, c: QPointF, deg: float) -> QPointF:
+    """Поворот точки вокруг c (ось Y вниз: deg > 0 — по часовой стрелке на экране)."""
+    r = math.radians(deg)
+    cs, sn = math.cos(r), math.sin(r)
+    dx, dy = p.x() - c.x(), p.y() - c.y()
+    return QPointF(c.x() + dx * cs - dy * sn, c.y() + dx * sn + dy * cs)
+
+
 class AnnotationItem(QGraphicsItem):
     TYPE = "object"
     TITLE = "Объект"
@@ -269,6 +277,43 @@ class AnnotationItem(QGraphicsItem):
         if self.filled_hit():
             path = path.united(self.outline_path())
         return path
+
+    # ------------------------------------------------------------ поворот шагом (пробел)
+    def uses_angle(self) -> bool:
+        """Поворот хранится в свойстве «angle» (иначе поворачивается геометрия)."""
+        return "angle" in self.DEFAULTS
+
+    def rotation_pivot(self) -> QPointF:
+        """Локальная точка, вокруг которой объект поворачивается сам."""
+        return self.outline_path().boundingRect().center()
+
+    def rotate_geometry(self, f) -> bool:
+        """Применить f(локальная точка) -> локальная точка к геометрии. False — не поддерживается."""
+        return False
+
+    def can_rotate(self) -> bool:
+        return self.uses_angle() or type(self).rotate_geometry is not AnnotationItem.rotate_geometry
+
+    def rotate_step(self, deg: float, center: QPointF | None = None) -> bool:
+        """Повернуть на deg градусов (по часовой при deg > 0) вокруг своего центра,
+        а если задан center (сцена) — ещё и переместить по дуге вокруг него."""
+        piv = self.rotation_pivot()
+        before = self.mapToScene(piv)
+        if self.uses_angle():
+            a = float(self.props.get("angle", 0) or 0) + deg
+            a = (a + 180.0) % 360.0 - 180.0
+            if a == -180.0:
+                a = 180.0
+            self.set_prop("angle", round(a, 3))
+        else:
+            if not self.rotate_geometry(lambda q: rotate_point(q, piv, deg)):
+                return False
+            self.update()
+        now = self.mapToScene(piv)
+        target = rotate_point(before, center, deg) if center is not None else before
+        if now != target:
+            self.setPos(self.pos() + (target - now))
+        return True
 
     def content_rect(self) -> QRectF:
         """Габарит содержимого в координатах сцены (для выравнивания, рамки выделения)."""

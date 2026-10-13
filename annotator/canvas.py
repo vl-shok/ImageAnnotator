@@ -361,6 +361,10 @@ class CanvasView(QGraphicsView):
             return
         if k == Qt.Key_Shift:
             self._redispatch()
+        if k == Qt.Key_Space and self.ed.sel.items and not ev.isAutoRepeat():
+            self.ed.rotate_selected(-45.0 if ev.modifiers() & Qt.ShiftModifier else 45.0)
+            self.viewport().update()
+            return
         if k in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down) and self.ed.sel.items:
             step = 10 if ev.modifiers() & Qt.ShiftModifier else 1
             dx = {Qt.Key_Left: -step, Qt.Key_Right: step}.get(k, 0)

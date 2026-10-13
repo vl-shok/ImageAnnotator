@@ -58,6 +58,11 @@ class DimensionItem(AnnotationItem):
         self.offset = float(d.get("offset", 0))
         self.t = float(d.get("t", 0.5))
 
+    def rotate_geometry(self, f):
+        self.prepareGeometryChange()
+        self.a, self.b = f(self.a), f(self.b)
+        return True
+
     # ------------------------------------------------------------------ geometry
     def set_drag(self, p0, p1, constrain=False, center=False):
         self.prepareGeometryChange()

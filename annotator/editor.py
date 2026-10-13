@@ -251,6 +251,34 @@ class Editor(QObject):
                 i.moveBy(dx, dy)
         self.change_items(items, fn, "Сдвиг", merge_key=("nudge", self.session))
 
+    def rotate_selected(self, deg=45.0):
+        """Пробел / Shift+пробел: повернуть выделенное на ±45°.
+        Один объект — вокруг своего центра, несколько — вокруг общего центра."""
+        movable = [i for i in self.sel.items if self.sel.is_movable(i)]
+        items = [i for i in movable if i.can_rotate()]
+        if len(items) < len(movable):
+            self.message.emit("Изображения и лупа не поворачиваются пробелом")
+        if not items:
+            return
+        center = None
+        if len(items) > 1:
+            key = (tuple(i.uid for i in items), self.undo.index())
+            cached = getattr(self, "_rot_center", None)
+            if cached and cached[0] == key:
+                center = cached[1]      # серия нажатий — центр не «плывёт»
+            else:
+                r = items[0].content_rect()
+                for i in items[1:]:
+                    r = r.united(i.content_rect())
+                center = r.center()
+
+        def fn():
+            for i in items:
+                i.rotate_step(deg, center)
+        self.change_items(items, fn, f"Поворот {deg:+g}°")
+        if center is not None:
+            self._rot_center = ((tuple(i.uid for i in items), self.undo.index()), center)
+
     def toggle_lock(self):
         items = list(self.sel.items)
         if not items:
