@@ -8,6 +8,8 @@
 > изменение и распространение, без гарантий.
 
 ## Запуск
+* **ImageAnnotator.exe** — готовая программа, Python не нужен. Собрать заново: `build_exe.bat`
+  (результат — `dist\ImageAnnotator.exe`);
 * двойной клик по **ImageAnnotator.bat** (или `python main.py [фото|проект.iap]`);
 * если не хватает библиотек — один раз запустить **install_requirements.bat** (PySide6, numpy).
 

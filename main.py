@@ -19,7 +19,9 @@ def _excepthook(etype, value, tb):
     msg = "".join(traceback.format_exception(etype, value, tb))
     sys.stderr.write(msg)
     try:
-        log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "error.log")
+        base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else \
+            os.path.dirname(os.path.abspath(__file__))
+        log = os.path.join(base, "error.log")
         with open(log, "a", encoding="utf-8") as f:
             f.write(msg + "\n")
     except OSError:
@@ -31,6 +33,11 @@ def _excepthook(etype, value, tb):
 
 def main():
     sys.excepthook = _excepthook
+    if getattr(sys, "frozen", False):
+        # собранный exe: плагины Qt лежат внутри пакета
+        plugins = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)), "PySide6", "plugins")
+        if os.path.isdir(plugins):
+            os.environ.setdefault("QT_PLUGIN_PATH", plugins)
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
