@@ -584,15 +584,89 @@ class BreakItem(PathItem):
     TYPE = "break"
     TITLE = "Разрыв"
     DEFAULTS = {"color": "#ff2020", "width": 3.0, "gap": 10.0, "opacity": 1.0,
-                "fill_gap": False, "fill_color": "#ffffff"}
+                "fill_gap": False, "fill_color": "#ffffff",
+                "mark": "dots", "mark_color": "#ff2020", "mark_alpha": 0.7, "overhang": 15}
+    MARKS = [("none", "Нет"), ("dots", "Точки"), ("hatch", "Штриховка"), ("solid", "Заливка")]
     PROPS = [
         PropSpec("color", "Цвет", "color", "Разрыв"),
         PropSpec("width", "Толщина", "float", "Разрыв", min=0.5, max=60, step=0.5, suffix=" px"),
         PropSpec("gap", "Зазор", "float", "Разрыв", min=1, max=400, step=1, suffix=" px"),
+        PropSpec("mark", "Подсветка", "enum", "Подсветка зазора", options=MARKS),
+        PropSpec("mark_color", "Цвет", "color", "Подсветка зазора"),
+        PropSpec("mark_alpha", "Непрозрачность", "opacity", "Подсветка зазора"),
+        PropSpec("overhang", "Выступ черт", "int", "Подсветка зазора", min=0, max=45, step=1, suffix=" %"),
         PropSpec("fill_gap", "Залить зазор", "bool", "Разрыв"),
         PropSpec("fill_color", "Цвет заливки", "color", "Разрыв"),
         OPACITY,
     ]
+
+    def paint_mark(self, painter, a, b):
+        """Подсветка вырезаемого участка: прямоугольник между чертами, черты выступают за него."""
+        kind = self.props.get("mark", "dots")
+        if kind == "none":
+            return
+        dx, dy = b.x() - a.x(), b.y() - a.y()
+        ln = math.hypot(dx, dy)
+        if ln < 1e-6:
+            return
+        gap = float(self.props.get("gap", 10))
+        w = float(self.props.get("width", 3))
+        k = max(0.0, min(45.0, float(self.props.get("overhang", 15)))) / 100.0
+        h = ln * (1 - 2 * k)              # длина подсвеченного участка вдоль черт
+        if h <= 0.5:
+            return
+        col = QColor(self.props.get("mark_color", "#ff2020"))
+        col.setAlphaF(max(0.0, min(1.0, float(self.props.get("mark_alpha", 0.7)))))
+        painter.save()
+        c = mid(a, b)
+        painter.translate(c)
+        painter.rotate(math.degrees(math.atan2(dy, dx)))
+        # ось X — вдоль черт, ось Y — поперёк (через зазор); черты сами не закрашиваем
+        inner = max(0.0, gap - w)
+        r = QRectF(-h / 2, -inner / 2, h, inner)
+        if r.height() <= 0.5:
+            painter.restore()
+            return
+        if kind == "solid":
+            sol = QColor(col)
+            sol.setAlphaF(col.alphaF() * 0.65)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(sol)
+            painter.drawRect(r)
+        else:
+            # лёгкий фон под узором, чтобы участок читался на пёстром фото
+            bg = QColor(col)
+            bg.setAlphaF(col.alphaF() * 0.3)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(bg)
+            painter.drawRect(r)
+            painter.setClipRect(r)
+            step = max(4.0, min(16.0, inner / 3.0, h / 3.0))
+            if kind == "hatch":
+                pen = make_pen(col, max(1.0, step * 0.28))
+                pen.setCapStyle(Qt.FlatCap)
+                painter.setPen(pen)
+                span = r.width() + r.height()
+                x = -span
+                while x < span:
+                    painter.drawLine(QPointF(r.left() + x, r.bottom()), QPointF(r.left() + x + r.height(), r.top()))
+                    x += step
+            else:  # dots — шахматная сетка точек
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(col)
+                rad = max(0.8, step * 0.27)
+                ny = max(1, int(round(r.height() / step)))
+                sy = r.height() / ny
+                nx = max(1, int(round(r.width() / step)))
+                sx = r.width() / nx
+                for j in range(ny):
+                    y = r.top() + sy * (j + 0.5)
+                    off = 0.5 * sx if j % 2 else 0.0
+                    for i in range(nx + 1):
+                        x = r.left() + sx * (i + 0.5) - off
+                        if r.left() - rad < x < r.right() + rad:
+                            painter.drawEllipse(QPointF(x, y), rad, rad)
+        painter.restore()
 
     def marks(self):
         if len(self.points) < 2:
@@ -675,6 +749,7 @@ class BreakItem(PathItem):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(self.props.get("fill_color", "#ffffff")))
             painter.drawPolygon(QPolygonF([a1, b1, b2, a2]))
+        self.paint_mark(painter, self.points[0], self.points[-1])
         pen = make_pen(self.props["color"], self.props["width"])
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)

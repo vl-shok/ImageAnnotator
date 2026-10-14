@@ -600,3 +600,25 @@ def test_space_rotation_45(ed):
     ed.rotate_selected(-90)
     sa, sb = d.mapToScene(d.a), d.mapToScene(d.b)
     assert math.isclose(sa.x(), sb.x(), abs_tol=1e-6)
+
+
+
+def test_break_gap_mark():
+    from PySide6.QtGui import QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+    from annotator.items.shapes import BreakItem
+    for kind, _ in BreakItem.MARKS:
+        sc = QGraphicsScene()
+        b = BreakItem(props={"mark": kind, "gap": 40, "width": 6, "mark_alpha": 1.0})
+        b.set_drag(QPointF(100, 20), QPointF(100, 180))
+        sc.addItem(b)
+        img = QImage(200, 200, QImage.Format_ARGB32_Premultiplied)
+        img.fill(QColor(255, 255, 255))
+        p = QPainter(img)
+        sc.render(p, QRectF(0, 0, 200, 200), QRectF(0, 0, 200, 200))
+        p.end()
+        inside = [QColor(img.pixel(x, y)) for x in range(86, 115) for y in range(60, 140)]
+        tinted = sum(1 for c in inside if c.green() < 240)
+        edge = QColor(img.pixel(100, 25))       # выступ черт — без подсветки
+        assert edge.green() > 240
+        assert (tinted > 0) == (kind != "none")
