@@ -433,11 +433,11 @@ class CalloutItem(AnnotationItem):
             hs.append(QPointF(tip))
             a = self.start_point(i)
             hs.append(a if a is not None else QPointF(tip))
-        hs.append(QPointF(0, 0))
+        hs.append(self.box().center())     # маркер перемещения блока (стрелки остаются на месте)
         return hs
 
     def handle_kinds(self):
-        return ["tip", "anchor"] * len(self.leaders) + ["box"]
+        return ["tip", "anchor"] * len(self.leaders) + ["move"]
 
     def leader_index(self, idx):
         """(номер указателя, 'tip' | 'anchor') для индекса ручки или None (блок)."""
@@ -455,10 +455,11 @@ class CalloutItem(AnnotationItem):
         self.prepareGeometryChange()
         li = self.leader_index(idx)
         if li is None:
-            # двигаем только текстовый блок, точки указания остаются на месте
-            self.setPos(self.pos() + p)
+            # двигаем только текстовый блок (центр — под курсор), точки указания остаются на месте
+            d = p - self.box().center()
+            self.setPos(self.pos() + d)
             for ld in self.leaders:
-                ld[0] = ld[0] - p
+                ld[0] = ld[0] - d
         elif li[1] == "tip":
             self.leaders[li[0]][0] = QPointF(p)
         else:

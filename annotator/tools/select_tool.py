@@ -42,6 +42,7 @@ class SelectTool(Tool):
         self.h_item = None
         self.h_idx = -1
         self.click_item = None
+        self.h_text = None
 
     def busy(self):
         return self.state is not None
@@ -49,7 +50,7 @@ class SelectTool(Tool):
     def hint(self):
         return ("Клик — выбрать, Ctrl+клик — добавить, рамка ←/→ — пересечение/окно, Shift+ручка — двигать за точку, "
                 "Alt+ручка — от центра, «+» — добавить вершину, двойной клик по вершине — удалить, "
-                "средняя ручка линии/стрелки — изгиб")
+                "средняя ручка линии/стрелки — изгиб, Ctrl+тянуть от рамки выноски — новая стрелка")
 
     # ------------------------------------------------------------------
     def press(self, e: ToolEvent):
@@ -66,6 +67,20 @@ class SelectTool(Tool):
                 v.snap_hit = None
             return
         self.press_pos = QPointF(e.pos)
+        if e.ctrl:
+            co = self._callout_border_at(e.pos)
+            if co is not None:
+                # Ctrl + тянуть от рамки выноски — новая стрелка
+                self.before = [co.state()]
+                lp = co.mapFromScene(e.pos)
+                co.add_leader(lp, co._border_param(lp, False))
+                if not sel.contains(co):
+                    sel.set([co])
+                self.h_item, self.h_idx = co, 2 * (len(co.leaders) - 1)
+                co.begin_handle_drag(self.h_idx)
+                self.h_text = "Добавить стрелку"
+                self.state = "handle"
+                return
         h = v.hit_handle(e.pos)
         if h is not None:
             item, idx = h
@@ -120,6 +135,8 @@ class SelectTool(Tool):
             return
         if self.state is None:
             v.update_hover(e.pos)
+            if e.ctrl and self._callout_border_at(e.pos) is not None:
+                v.viewport().setCursor(Qt.CrossCursor)
             return
         if self.state == "pending":
             if self.screen_dist(e.pos, self.press_pos) < DRAG_THRESHOLD or not self.items:
@@ -158,7 +175,7 @@ class SelectTool(Tool):
         if st == "move":
             self.ed.record_items(self.items, self.before, "Перемещение")
         elif st == "handle":
-            self.ed.record_items([self.h_item], self.before, "Изменение формы")
+            self.ed.record_items([self.h_item], self.before, getattr(self, "h_text", None) or "Изменение формы")
         elif st == "pending" and self.click_item is not None and not e.ctrl:
             # клик по уже выбранному объекту в группе выделения — выбрать только его
             if len(sel.items) > 1 and not self.click_item.group_id:
@@ -204,14 +221,21 @@ class SelectTool(Tool):
         if it is not None:
             self.ed.edit_item(it)
 
+    def _callout_border_at(self, pos):
+        """Выноска, рамка которой под курсором (с допуском в несколько экранных пикселей)."""
+        tol = 7 / max(1e-6, self.view.scale_factor())
+        for it in reversed(self.doc.items_sorted()):
+            if it.TYPE != "callout" or not self.ed.sel.is_movable(it):
+                continue
+            lp = it.mapFromScene(pos)
+            b = it.box()
+            if b.adjusted(-tol, -tol, tol, tol).contains(lp) and not b.adjusted(tol, tol, -tol, -tol).contains(lp):
+                return it
+        return None
+
     def action_bar(self):
         if self.pending_leader is not None:
             return ("Щёлкните, куда должна указывать новая стрелка", [("✕  Отмена", self.cancel)])
-        items = self.ed.sel.items
-        if self.state is None and len(items) == 1 and items[0].TYPE == "callout" and not items[0].locked:
-            it = items[0]
-            return ("Выноска: ромб — начало стрелки, двойной клик по острию — удалить стрелку",
-                    [("＋  Стрелка", lambda: self.ed.begin_add_leader(it))])
         return None
 
     def cancel(self):

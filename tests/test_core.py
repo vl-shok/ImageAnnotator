@@ -718,3 +718,33 @@ def test_new_items_on_top(ed):
     c.layer_id = a.layer_id          # как делают инструменты рисования
     ed.add_items([c])
     assert a.zValue() < b.zValue() < c.zValue()
+
+
+def test_callout_ctrl_drag_new_leader(ed):
+    from PySide6.QtCore import Qt
+    from annotator.canvas import CanvasView
+    from annotator.tools.base import ToolEvent
+    from annotator.tools.draw_tools import make_tools
+    view = CanvasView(ed)  # noqa: F841
+    for tl in make_tools(ed):
+        ed.register_tool(tl)
+    ed.set_tool("select")
+    c = CalloutItem({"text": "Комментарий"})
+    c.setPos(200, 200)
+    ed.add_items([c])
+    b = c.mapToScene(c.box()).boundingRect()
+    start = QPointF(b.right(), b.center().y())
+    t = ed.tool
+    t.press(ToolEvent(start, None, Qt.ControlModifier, Qt.LeftButton, Qt.LeftButton))
+    t.move(ToolEvent(QPointF(600, 500), None, Qt.ControlModifier, Qt.NoButton, Qt.LeftButton))
+    t.release(ToolEvent(QPointF(600, 500), None, Qt.ControlModifier, Qt.LeftButton, Qt.NoButton))
+    assert len(c.leaders) == 2
+    tip = c.mapToScene(c.leaders[1][0])
+    assert abs(tip.x() - 600) < 1 and abs(tip.y() - 500) < 1
+    assert c.leaders[1][1][0] == 1.0          # начало — на правой грани
+    assert ed.undo.undoText() == "Добавить стрелку"
+    # маркер в центре блока двигает только блок
+    hs = c.handles()
+    assert c.handle_kinds()[-1] == "move" and hs[-1] == c.box().center()
+    c.move_handle(len(hs) - 1, c.box().center() + QPointF(30, 0))
+    assert abs(c.mapToScene(c.leaders[1][0]).x() - 600) < 1e-6

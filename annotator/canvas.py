@@ -558,6 +558,17 @@ class CanvasView(QGraphicsView):
             painter.drawLine(QPointF(sp.x() - k, sp.y()), QPointF(sp.x() + k, sp.y()))
             painter.drawLine(QPointF(sp.x(), sp.y() - k), QPointF(sp.x(), sp.y() + k))
             return
+        if kind == "move":     # маркер перемещения (центр блока выноски) — круг с крестом
+            s = self.px(HANDLE_PX + (4 if hover else 2)) * 0.6
+            pen = QPen(QColor(20, 20, 20), 1)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(QColor(255, 140, 0) if hover else QColor(255, 255, 255))
+            painter.drawEllipse(sp, s, s)
+            k = s * 0.55
+            painter.drawLine(QPointF(sp.x() - k, sp.y()), QPointF(sp.x() + k, sp.y()))
+            painter.drawLine(QPointF(sp.x(), sp.y() - k), QPointF(sp.x(), sp.y() + k))
+            return
         if kind == "anchor":   # начало указателя выноски — ромб на рамке
             s = self.px(HANDLE_PX + (3 if hover else 1)) * 0.62
             pen = QPen(QColor(20, 20, 20), 1)
