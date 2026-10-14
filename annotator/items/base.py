@@ -291,6 +291,10 @@ class AnnotationItem(QGraphicsItem):
         """Применить f(локальная точка) -> локальная точка к геометрии. False — не поддерживается."""
         return False
 
+    def handle_snap_extra(self, idx):
+        """Дополнительные точки привязки (сцена) при перетаскивании ручки idx — например, свои же точки."""
+        return None
+
     def can_rotate(self) -> bool:
         return self.uses_angle() or type(self).rotate_geometry is not AnnotationItem.rotate_geometry
 

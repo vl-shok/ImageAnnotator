@@ -445,6 +445,13 @@ class CalloutItem(AnnotationItem):
             return None
         return idx // 2, ("tip" if idx % 2 == 0 else "anchor")
 
+    def handle_snap_extra(self, idx):
+        li = self.leader_index(idx)
+        if li is None or li[1] != "anchor":
+            return None
+        # начало стрелки — к углам и серединам сторон своего блока
+        return [(self.mapToScene(p), k) for p, k in rect_snap_points(self.box()) if k != "center"]
+
     def handle_cursor(self, idx):
         li = self.leader_index(idx)
         if li is None:

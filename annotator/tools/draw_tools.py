@@ -319,8 +319,25 @@ class CalloutTool(Tool, _TempMixin):
     def hint(self):
         return "Нажмите на объект и тяните к месту текста, отпустите — введите комментарий"
 
+    # правка уже выделенной выноски прямо в этом инструменте (ручки, Ctrl+тянуть от рамки)
+    def _editing_target(self, e):
+        sel_tool = self.ed.tools.get("select")
+        if sel_tool is None:
+            return None
+        h = self.view.hit_handle(e.pos)
+        if h is not None and h[0].TYPE == "callout":
+            return sel_tool
+        if e.ctrl and sel_tool._callout_border_at(e.pos) is not None:
+            return sel_tool
+        return None
+
     def press(self, e):
         if e.button != Qt.LeftButton:
+            return
+        tgt = self._editing_target(e)
+        if tgt is not None:
+            self._edit = tgt
+            tgt.press(e)
             return
         self.p0 = self.view.snap(e.pos)
         item = CalloutItem({"text": "…"})
@@ -338,12 +355,32 @@ class CalloutTool(Tool, _TempMixin):
         it.update()
 
     def move(self, e):
+        if getattr(self, "_edit", None) is not None:
+            self._edit.move(e)
+            return
         if self.temp is None:
+            if not e.left_down and self._editing_target(e) is not None:
+                self.view.update_hover(e.pos)
+                h = self.view.hit_handle(e.pos)
+                self.view.viewport().setCursor(h[0].handle_cursor(h[1]) if h else Qt.CrossCursor)
+                self._hovering = True
+                return
+            if getattr(self, "_hovering", False):
+                self._hovering = False
+                self.view.hover_handle = None
+                self.view.viewport().setCursor(self.cursor)
+                self.view.viewport().update()
             return super().move(e)
         if e.left_down:
             self._place(e.pos)
 
     def release(self, e):
+        if getattr(self, "_edit", None) is not None:
+            if e.button == Qt.LeftButton:
+                self._edit.release(e)
+                self._edit = None
+                self.view.viewport().setCursor(self.cursor)
+            return
         if self.temp is None or e.button != Qt.LeftButton:
             return
         p1 = e.pos if self.screen_dist(e.pos, self.p0) > MIN_SIZE_PX * 3 else self.p0 + QPointF(
@@ -362,6 +399,10 @@ class CalloutTool(Tool, _TempMixin):
         self._commit_temp(self.title)
 
     def cancel(self):
+        if getattr(self, "_edit", None) is not None:
+            self._edit.cancel()
+            self._edit = None
+            return True
         if self.temp is None:
             return False
         self._drop_temp()

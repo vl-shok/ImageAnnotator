@@ -748,3 +748,30 @@ def test_callout_ctrl_drag_new_leader(ed):
     assert c.handle_kinds()[-1] == "move" and hs[-1] == c.box().center()
     c.move_handle(len(hs) - 1, c.box().center() + QPointF(30, 0))
     assert abs(c.mapToScene(c.leaders[1][0]).x() - 600) < 1e-6
+
+
+def test_callout_anchor_snaps_and_edit_in_callout_tool(ed):
+    from PySide6.QtCore import Qt
+    from annotator.canvas import CanvasView
+    from annotator.tools.base import ToolEvent
+    from annotator.tools.draw_tools import make_tools
+    view = CanvasView(ed)  # noqa: F841
+    for tl in make_tools(ed):
+        ed.register_tool(tl)
+    c = CalloutItem({"text": "Комментарий"})
+    c.setPos(200, 200)
+    c.tip = QPointF(-100, 150)
+    ed.add_items([c])
+    ed.sel.set([c])
+    ed.set_tool("callout")
+    t = ed.tool
+    b = c.box()
+    anchor = c.mapToScene(c.handles()[1])
+    # тянем ромб к почти-углу блока — должен прилипнуть ровно к углу
+    near_corner = c.mapToScene(QPointF(b.right() - 2, b.bottom() + 1))
+    t.press(ToolEvent(anchor, None, Qt.NoModifier, Qt.LeftButton, Qt.LeftButton))
+    t.move(ToolEvent(near_corner, None, Qt.NoModifier, Qt.NoButton, Qt.LeftButton))
+    t.release(ToolEvent(near_corner, None, Qt.NoModifier, Qt.LeftButton, Qt.NoButton))
+    assert c.leaders[0][1] == (1.0, 1.0)
+    assert len(ed.doc.items()) == 1          # новая выноска не создалась
+    assert ed.tool.name == "callout"

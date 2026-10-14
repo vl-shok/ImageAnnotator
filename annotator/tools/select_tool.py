@@ -158,7 +158,7 @@ class SelectTool(Tool):
             self.doc.itemsModified.emit()
         elif self.state == "handle":
             item = self.h_item
-            p = v.snap(e.pos, exclude=[item])
+            p = v.snap(e.pos, exclude=[item], extra=item.handle_snap_extra(self.h_idx))
             item.move_handle(self.h_idx, item.mapFromScene(p), constrain=e.shift, symmetric=e.alt)
             self.doc.itemsModified.emit()
         elif self.state == "rubber":
