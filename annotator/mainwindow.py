@@ -54,6 +54,7 @@ HOTKEYS = [
     ("Двойной клик / ПКМ по вершине", "Удалить вершину (или Alt+клик)"), ("Ctrl+M", "Коррекция цвета"),
     ("Ctrl+Alt+G", "Менеджер групп"), ("Shift+S", "Привязка вкл/выкл"),
     ("Ctrl+D", "Дублировать"), ("Ctrl+G / Ctrl+Shift+G", "Группировать / разгруппировать"),
+    ("Выноска: «+ Стрелка» / ПКМ", "Добавить стрелку; ромб — начало, двойной клик по острию — удалить"),
     ("Ctrl+L", "Заблокировать объект"), ("Ctrl+] / Ctrl+[", "Выше / ниже (Shift — наверх/вниз)"),
     ("Ctrl+Shift+C", "Копировать результат как картинку"),
     ("Ctrl+E", "Экспорт PNG/JPG/PDF"),
@@ -627,6 +628,16 @@ class MainWindow(QMainWindow):
                 m.addAction("Выпрямить", lambda: ed.straighten(item))
                 m.exec(gpos)
                 return
+            if kind in ("tip", "anchor") and item.TYPE == "callout":
+                n = idx // 2
+                m = QMenu(self)
+                m.addAction("Добавить стрелку", lambda: ed.begin_add_leader(item))
+                a = m.addAction("Удалить эту стрелку", lambda: ed.remove_callout_leader(item, n))
+                a.setEnabled(len(item.leaders) > 1)
+                a = m.addAction("Начало стрелки — авто", lambda: ed.reset_callout_start(item, n))
+                a.setEnabled(item.leaders[n][1] is not None)
+                m.exec(gpos)
+                return
         if ed.tool is not None and ed.tool.name == "raster" and ed.raster_sel is not None:
             m = QMenu(self)
             for k in ("copy", "cut", "delete", None, "raster_obj", "raster_fill", "raster_opacity", "raster_blur",
@@ -641,6 +652,9 @@ class MainWindow(QMainWindow):
         if ed.sel.items:
             if len(ed.sel.items) == 1 and ("text" in ed.sel.items[0].props or ed.sel.items[0].TYPE == "number"):
                 m.addAction("Редактировать текст…", lambda: ed.edit_item(ed.sel.items[0]))
+                if ed.sel.items[0].TYPE == "callout":
+                    co = ed.sel.items[0]
+                    m.addAction("Добавить стрелку", lambda: ed.begin_add_leader(co))
                 m.addSeparator()
             for k in ("cut", "copy", "paste", "duplicate", "delete"):
                 m.addAction(self.acts[k])

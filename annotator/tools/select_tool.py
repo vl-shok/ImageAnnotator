@@ -28,6 +28,7 @@ class SelectTool(Tool):
 
     def __init__(self, editor):
         super().__init__(editor)
+        self.pending_leader = None   # выноска, к которой добавляется стрелка (ждём щелчка)
         self._reset()
 
     def _reset(self):
@@ -56,12 +57,24 @@ class SelectTool(Tool):
             return
         v, sel = self.view, self.ed.sel
         self._reset()
+        if self.pending_leader is not None:
+            item, self.pending_leader = self.pending_leader, None
+            v.viewport().setCursor(self.cursor)
+            v.snap_hit = None
+            if self.doc.contains(item):
+                self.ed.add_callout_leader(item, v.snap(e.pos, exclude=[item]))
+                v.snap_hit = None
+            return
         self.press_pos = QPointF(e.pos)
         h = v.hit_handle(e.pos)
         if h is not None:
             item, idx = h
             kinds = item.handle_kinds()
             kind = kinds[idx] if idx < len(kinds) else "point"
+            if e.alt and kind in ("tip", "anchor") and item.TYPE == "callout":
+                n = idx // 2
+                self.ed.remove_callout_leader(item, n) if kind == "tip" else self.ed.reset_callout_start(item, n)
+                return
             if e.alt and kind == "vertex" and item.TYPE in ("polyline", "polygon"):
                 self.ed.delete_vertex(item, idx)
                 self.state = None
@@ -101,6 +114,10 @@ class SelectTool(Tool):
 
     def move(self, e: ToolEvent):
         v = self.view
+        if self.pending_leader is not None:
+            v.snap(e.pos, exclude=[self.pending_leader])
+            v.viewport().update()
+            return
         if self.state is None:
             v.update_hover(e.pos)
             return
@@ -179,11 +196,32 @@ class SelectTool(Tool):
             if kind == "bend":
                 self.ed.straighten(item)
                 return
+            if kind in ("tip", "anchor") and item.TYPE == "callout":
+                n = idx // 2
+                self.ed.remove_callout_leader(item, n) if kind == "tip" else self.ed.reset_callout_start(item, n)
+                return
         it = self.view.hit_item(e.pos)
         if it is not None:
             self.ed.edit_item(it)
 
+    def action_bar(self):
+        if self.pending_leader is not None:
+            return ("Щёлкните, куда должна указывать новая стрелка", [("✕  Отмена", self.cancel)])
+        items = self.ed.sel.items
+        if self.state is None and len(items) == 1 and items[0].TYPE == "callout" and not items[0].locked:
+            it = items[0]
+            return ("Выноска: ромб — начало стрелки, двойной клик по острию — удалить стрелку",
+                    [("＋  Стрелка", lambda: self.ed.begin_add_leader(it))])
+        return None
+
     def cancel(self):
+        if self.pending_leader is not None:
+            self.pending_leader = None
+            if self.view:
+                self.view.viewport().setCursor(self.cursor)
+                self.view.snap_hit = None
+                self.view.viewport().update()
+            return True
         if self.state is None:
             return False
         if self.state == "move" and self.before:

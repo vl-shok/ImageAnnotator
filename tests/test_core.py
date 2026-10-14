@@ -675,3 +675,46 @@ def test_raster_ops_on_pasted_image(ed):
     # активный «Фон» — область берётся с фото
     ed.set_active_layer("bg")
     assert ed.raster_target()[0] is None
+
+
+def test_callout_multiple_leaders(ed):
+    c = CalloutItem({"text": "Общий комментарий"})
+    c.setPos(200, 200)
+    c.tip = QPointF(-50, 80)
+    ed.add_items([c])
+    # начало стрелки — по рамке
+    b = c.box()
+    idx_anchor = 1
+    c.move_handle(idx_anchor, QPointF(b.right() + 30, b.top() + b.height() * 0.25))
+    assert c.leaders[0][1][0] == 1.0
+    ed.add_callout_leader(c, QPointF(500, 400))
+    assert len(c.leaders) == 2 and len(c.handles()) == 5
+    assert abs(c.mapToScene(c.leaders[1][0]).x() - 500) < 1e-6
+    d = c.to_dict(full=True)
+    c2 = CalloutItem()
+    c2.apply_dict(d)
+    assert len(c2.leaders) == 2 and c2.leaders[0][1] == c.leaders[0][1]
+    # перемещение блока не двигает острия
+    c.move_handle(4, QPointF(10, 10))
+    assert abs(c.mapToScene(c.leaders[1][0]).x() - 500) < 1e-6
+    ed.remove_callout_leader(c, 1)
+    assert len(c.leaders) == 1
+    ed.remove_callout_leader(c, 0)            # последний не удаляется
+    assert len(c.leaders) == 1
+    ed.undo.undo()
+    assert len(c.leaders) == 2
+    # старый формат (одна точка tip)
+    c3 = CalloutItem()
+    c3.geom_from_dict({"tip": [5, 6]})
+    assert len(c3.leaders) == 1 and c3.tip == QPointF(5, 6)
+
+
+def test_new_items_on_top(ed):
+    a = line((0, 0), (100, 0))
+    b = line((0, 10), (100, 10))
+    ed.add_items([a])
+    ed.add_items([b])
+    c = line((0, 20), (100, 20))
+    c.layer_id = a.layer_id          # как делают инструменты рисования
+    ed.add_items([c])
+    assert a.zValue() < b.zValue() < c.zValue()

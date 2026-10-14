@@ -90,6 +90,9 @@ class Editor(QObject):
         items = list(items)
         if not items:
             return
+        for k, it in enumerate(items):     # новые объекты — поверх существующих в своём слое
+            if it.z_local < 1e9:
+                it.z_local = 1e9 + k
         self.push(AddCmd(self.doc, items, text))
         if select:
             self.sel.set(items)
@@ -834,6 +837,36 @@ class Editor(QObject):
             self.message.emit(f"Минимум вершин: {item.MIN_POINTS}")
             return
         self.change_items([item], lambda: item.remove_vertex(idx), "Удалить вершину")
+
+    # ------------------------------------------------------------ указатели выноски
+    def add_callout_leader(self, item, tip_scene: QPointF):
+        if item.TYPE != "callout" or item.locked:
+            return
+        self.change_items([item], lambda: item.add_leader(item.mapFromScene(tip_scene)), "Добавить указатель")
+        self.sel.changed.emit()
+
+    def remove_callout_leader(self, item, i):
+        if item.TYPE != "callout":
+            return
+        if len(item.leaders) <= 1:
+            self.message.emit("У выноски должен остаться хотя бы один указатель")
+            return
+        self.change_items([item], lambda: item.remove_leader(i), "Удалить указатель")
+        self.sel.changed.emit()
+
+    def reset_callout_start(self, item, i):
+        if item.TYPE == "callout":
+            self.change_items([item], lambda: item.reset_start(i), "Начало указателя — авто")
+
+    def begin_add_leader(self, item):
+        """Режим «щёлкните, куда указать» для новой стрелки выноски."""
+        self.set_tool("select")
+        self.sel.set([item])
+        self.tool.pending_leader = item
+        if self.view:
+            self.view.viewport().setCursor(Qt.CrossCursor)
+            self.view.update_action_bar()
+        self.message.emit("Щёлкните, куда должна указывать новая стрелка (Esc — отмена)")
 
     def straighten(self, item):
         if getattr(item, "ctrl", None) is None:

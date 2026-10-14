@@ -462,6 +462,13 @@ class LayersPanel(QWidget):
                     m.addAction("Новый слой", self.add_layer)
                     m.addAction("Удалить слой", lambda: self.ed.delete_layer(key))
             else:
+                it = self.doc.find(key)
+                if it is not None and not self.ed.sel.contains(it):
+                    self.ed.sel.set([it])
+                for label, mode in (("Наверх  (Ctrl+Shift+])", "front"), ("Выше  (Ctrl+])", "forward"),
+                                    ("Ниже  (Ctrl+[)", "backward"), ("Вниз  (Ctrl+Shift+[)", "back")):
+                    m.addAction(label, (lambda md: (lambda: self.ed.reorder(md)))(mode))
+                m.addSeparator()
                 sub = m.addMenu("Перенести в слой")
                 for l in reversed(self.doc.annotation_layers()):
                     sub.addAction(l.name, (lambda lid: (lambda: self.ed.move_to_layer(self.ed.sel.items, lid)))(l.id))

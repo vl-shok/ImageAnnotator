@@ -282,15 +282,32 @@ class CalloutItem(AnnotationItem):
 
     def __init__(self, props=None, tip: QPointF | None = None):
         super().__init__(props)
-        self.tip = QPointF(tip) if tip is not None else QPointF(-40, 60)
+        # указатели: [точка указания (локально), начало на рамке (fx, fy) или None — авто]
+        self.leaders = [[QPointF(tip) if tip is not None else QPointF(-40, 60), None]]
         self._layout = None
 
+    # первый указатель — для совместимости
+    @property
+    def tip(self) -> QPointF:
+        return self.leaders[0][0]
+
+    @tip.setter
+    def tip(self, p: QPointF):
+        self.leaders[0][0] = QPointF(p)
+
     def geom_to_dict(self, full=False):
-        return {"tip": [round(self.tip.x(), 3), round(self.tip.y(), 3)]}
+        out = []
+        for t, st in self.leaders:
+            out.append([round(t.x(), 3), round(t.y(), 3)] + ([round(st[0], 4), round(st[1], 4)] if st else []))
+        return {"tip": out[0][:2], "leaders": out}
 
     def geom_from_dict(self, d):
-        t = d.get("tip", [-40, 60])
-        self.tip = QPointF(float(t[0]), float(t[1]))
+        lst = d.get("leaders")
+        if not lst:
+            t = d.get("tip", [-40, 60])
+            lst = [[t[0], t[1]]]
+        self.leaders = [[QPointF(float(v[0]), float(v[1])),
+                         (float(v[2]), float(v[3])) if len(v) >= 4 else None] for v in lst]
         self._layout = None
 
     def props_changed(self):
@@ -309,33 +326,86 @@ class CalloutItem(AnnotationItem):
 
     def rotate_geometry(self, f):
         self.prepareGeometryChange()
-        self.tip = f(self.tip)
+        for ld in self.leaders:
+            ld[0] = f(ld[0])
         return True
 
-    def anchor(self) -> QPointF | None:
+    # --------------------------------------------------------- указатели
+    def start_point(self, i: int) -> QPointF | None:
+        """Начало i-го указателя на рамке блока (None — точка внутри блока, линии нет)."""
         b = self.box()
-        if b.contains(self.tip):
+        tip, st = self.leaders[i]
+        if b.contains(tip):
             return None
+        if st is not None:
+            return QPointF(b.left() + st[0] * b.width(), b.top() + st[1] * b.height())
         c = b.center()
         cands = [QPointF(c.x(), b.top()), QPointF(b.right(), c.y()),
                  QPointF(c.x(), b.bottom()), QPointF(b.left(), c.y())]
-        return min(cands, key=lambda q: dist(q, self.tip))
+        return min(cands, key=lambda q: dist(q, tip))
+
+    def anchor(self) -> QPointF | None:
+        return self.start_point(0)
+
+    def segments(self):
+        out = []
+        for i, (tip, _) in enumerate(self.leaders):
+            a = self.start_point(i)
+            if a is not None:
+                out.append((a, tip))
+        return out
+
+    def add_leader(self, tip: QPointF, start=None):
+        self.prepareGeometryChange()
+        self.leaders.append([QPointF(tip), start])
+        self.update()
+
+    def remove_leader(self, i: int) -> bool:
+        if len(self.leaders) <= 1 or not 0 <= i < len(self.leaders):
+            return False
+        self.prepareGeometryChange()
+        del self.leaders[i]
+        self.update()
+        return True
+
+    def reset_start(self, i: int):
+        if 0 <= i < len(self.leaders):
+            self.leaders[i][1] = None
+            self.update()
+
+    def _border_param(self, p: QPointF, snap_mid: bool):
+        """Ближайшая к p точка рамки как (fx, fy)."""
+        b = self.box()
+        if b.width() <= 0 or b.height() <= 0:
+            return None
+        fx = min(1.0, max(0.0, (p.x() - b.left()) / b.width()))
+        fy = min(1.0, max(0.0, (p.y() - b.top()) / b.height()))
+        # расстояния до сторон в пикселях
+        d = {"l": fx * b.width(), "r": (1 - fx) * b.width(), "t": fy * b.height(), "b": (1 - fy) * b.height()}
+        side = min(d, key=d.get)
+        if side in ("l", "r"):
+            fx = 0.0 if side == "l" else 1.0
+            if snap_mid:
+                fy = min((0.0, 0.5, 1.0), key=lambda v: abs(v - fy))
+        else:
+            fy = 0.0 if side == "t" else 1.0
+            if snap_mid:
+                fx = min((0.0, 0.5, 1.0), key=lambda v: abs(v - fx))
+        return (round(fx, 4), round(fy, 4))
 
     def leader_path(self):
         p = QPainterPath()
-        a = self.anchor()
-        if a is not None:
+        for a, t in self.segments():
             p.moveTo(a)
-            p.lineTo(self.tip)
+            p.lineTo(t)
         return p
 
     def outline_path(self):
         p = QPainterPath()
         p.addRect(self.box())
-        a = self.anchor()
-        if a is not None:
+        for a, t in self.segments():
             p.moveTo(a)
-            p.lineTo(self.tip)
+            p.lineTo(t)
         return p
 
     def hit(self, scene_pt, tol):
@@ -356,35 +426,57 @@ class CalloutItem(AnnotationItem):
     def margin(self):
         return float(self.props.get("line_width", 2)) * 6 + 12 + float(self.props.get("tip_size") or 0)
 
+    # ручки: [острие 1, начало 1, острие 2, начало 2, …, блок]
     def handles(self):
-        return [QPointF(self.tip), QPointF(0, 0)]
+        hs = []
+        for i, (tip, _) in enumerate(self.leaders):
+            hs.append(QPointF(tip))
+            a = self.start_point(i)
+            hs.append(a if a is not None else QPointF(tip))
+        hs.append(QPointF(0, 0))
+        return hs
+
+    def handle_kinds(self):
+        return ["tip", "anchor"] * len(self.leaders) + ["box"]
+
+    def leader_index(self, idx):
+        """(номер указателя, 'tip' | 'anchor') для индекса ручки или None (блок)."""
+        if idx >= 2 * len(self.leaders):
+            return None
+        return idx // 2, ("tip" if idx % 2 == 0 else "anchor")
 
     def handle_cursor(self, idx):
-        return Qt.CrossCursor if idx == 0 else Qt.SizeAllCursor
+        li = self.leader_index(idx)
+        if li is None:
+            return Qt.SizeAllCursor
+        return Qt.CrossCursor if li[1] == "tip" else Qt.PointingHandCursor
 
     def move_handle(self, idx, p, constrain=False, symmetric=False):
         self.prepareGeometryChange()
-        if idx == 0:
-            self.tip = QPointF(p)
-        else:
-            # двигаем только текстовый блок, точка указания остаётся на месте
+        li = self.leader_index(idx)
+        if li is None:
+            # двигаем только текстовый блок, точки указания остаются на месте
             self.setPos(self.pos() + p)
-            self.tip = self.tip - p
+            for ld in self.leaders:
+                ld[0] = ld[0] - p
+        elif li[1] == "tip":
+            self.leaders[li[0]][0] = QPointF(p)
+        else:
+            self.leaders[li[0]][1] = self._border_param(p, constrain)
         self.update()
 
     def snap_points(self):
-        return [(QPointF(self.tip), "endpoint")] + rect_snap_points(self.box())
+        return [(QPointF(t), "endpoint") for t, _ in self.leaders] + rect_snap_points(self.box())
 
     def paint(self, painter, option, widget=None):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.TextAntialiasing)
         self.paint_opacity(painter)
         box, trect, flags, font = self.layout()
-        a = self.anchor()
         lc = self.props["line_color"]
         lw = float(self.props["line_width"])
-        if a is not None:
-            draw_line_with_caps(painter, [a, self.tip], lc, lw, "solid", "none", self.props.get("tip", "arrow"),
+        for a, t in self.segments():
+            draw_line_with_caps(painter, [a, t], lc, lw, "solid", "none", self.props.get("tip", "arrow"),
                                 end_size=self.props.get("tip_size", 0))
         paint_text_box(painter, self.props, box, trect, flags, font,
                        border_color=lc if self.props.get("border") else None, border_w=lw)

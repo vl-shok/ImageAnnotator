@@ -361,6 +361,13 @@ class CalloutTool(Tool, _TempMixin):
             self._place(p1)
         self._commit_temp(self.title)
 
+    def action_bar(self):
+        items = self.ed.sel.items
+        if self.temp is None and len(items) == 1 and items[0].TYPE == "callout" and not items[0].locked:
+            it = items[0]
+            return ("Нужно указать на несколько объектов?", [("＋  Стрелка", lambda: self.ed.begin_add_leader(it))])
+        return None
+
     def cancel(self):
         if self.temp is None:
             return False

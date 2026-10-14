@@ -75,14 +75,17 @@ class ActionBar(QFrame):
                 b.hide()
                 b.deleteLater()
             self._buttons = []
-            for label, fn in actions:
+            for n, (label, _) in enumerate(actions):
                 b = QToolButton()
                 b.setText(label)
                 b.setCursor(Qt.PointingHandCursor)
-                b.clicked.connect(fn)
+                # функция берётся актуальная (кнопки переиспользуются при том же наборе подписей)
+                b.clicked.connect((lambda k: (lambda: self._fns[k]()))(n))
                 self.lay.addWidget(b)
+                b.show()
                 self._buttons.append(b)
             self._key = key
+        self._fns = [fn for _, fn in actions]
         self.label.adjustSize()
         self.adjustSize()
         par = self.parentWidget()
@@ -135,6 +138,7 @@ class CanvasView(QGraphicsView):
         editor.cropChanged.connect(self._bar_timer.start)
         editor.rasterSelectionChanged.connect(self._bar_timer.start)
         editor.sel.changed.connect(self.viewport().update)
+        editor.sel.changed.connect(self._bar_timer.start)
         editor.doc.itemsModified.connect(self.viewport().update)
         editor.doc.itemsChanged.connect(self._on_items_changed)
 
@@ -553,6 +557,15 @@ class CanvasView(QGraphicsView):
             k = s * 0.3
             painter.drawLine(QPointF(sp.x() - k, sp.y()), QPointF(sp.x() + k, sp.y()))
             painter.drawLine(QPointF(sp.x(), sp.y() - k), QPointF(sp.x(), sp.y() + k))
+            return
+        if kind == "anchor":   # начало указателя выноски — ромб на рамке
+            s = self.px(HANDLE_PX + (3 if hover else 1)) * 0.62
+            pen = QPen(QColor(20, 20, 20), 1)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(QColor(255, 140, 0) if hover else QColor(120, 220, 255))
+            painter.drawPolygon(QPolygonF([QPointF(sp.x(), sp.y() - s), QPointF(sp.x() + s, sp.y()),
+                                           QPointF(sp.x(), sp.y() + s), QPointF(sp.x() - s, sp.y())]))
             return
         if kind == "rot":
             s = self.px(HANDLE_PX + (3 if hover else 1)) / 2
