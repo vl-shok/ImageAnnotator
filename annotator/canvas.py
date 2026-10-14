@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QBrush, QGuiApplication, QColor, QFont, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import QFrame, QGraphicsView
 
 from .geometry import dist
@@ -151,6 +151,12 @@ class CanvasView(QGraphicsView):
         return n / self.scale_factor()
 
     def snap(self, pt: QPointF, exclude=(), extra=None) -> QPointF:
+        # зажат Ctrl — привязки временно отключены (тянуть/рисовать свободно)
+        if QGuiApplication.queryKeyboardModifiers() & Qt.ControlModifier:
+            if self.snap_hit is not None:
+                self.snap_hit = None
+                self.viewport().update()
+            return QPointF(pt)
         res = self.ed.snap.find(self.ed.doc, pt, self.px(self.ed.snap.radius_px), exclude, extra)
         if res != self.snap_hit:
             self.snap_hit = res
@@ -368,7 +374,7 @@ class CanvasView(QGraphicsView):
                 tool.finish()
             self.viewport().update()
             return
-        if k == Qt.Key_Shift:
+        if k in (Qt.Key_Shift, Qt.Key_Control):
             self._redispatch()
         if k == Qt.Key_Space and self.ed.sel.items and not ev.isAutoRepeat():
             self.ed.rotate_selected(-45.0 if ev.modifiers() & Qt.ShiftModifier else 45.0)
@@ -396,7 +402,7 @@ class CanvasView(QGraphicsView):
         self.viewport().update()
 
     def keyReleaseEvent(self, ev):
-        if ev.key() == Qt.Key_Shift:
+        if ev.key() in (Qt.Key_Shift, Qt.Key_Control):
             self._redispatch()
         super().keyReleaseEvent(ev)
 
