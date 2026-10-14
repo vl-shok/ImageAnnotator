@@ -317,7 +317,8 @@ class CalloutTool(Tool, _TempMixin):
         return self.temp is not None
 
     def hint(self):
-        return "Нажмите на объект и тяните к месту текста, отпустите — введите комментарий"
+        return ("Нажмите, где будет комментарий, и тяните к объекту — там будет острие стрелки. "
+                "Отпустите — введите текст")
 
     # правка уже выделенной выноски прямо в этом инструменте (ручки, Ctrl+тянуть от рамки)
     def _editing_target(self, e):
@@ -339,19 +340,19 @@ class CalloutTool(Tool, _TempMixin):
             self._edit = tgt
             tgt.press(e)
             return
-        self.p0 = self.view.snap(e.pos)
+        self.p0 = QPointF(e.pos)                # центр блока комментария
         item = CalloutItem({"text": "…"})
         self._start_temp(item)
-        self._place(self.p0 + QPointF(40, -50))
+        self._place(self.p0)
 
-    def _place(self, p1: QPointF):
+    def _place(self, tip: QPointF):
+        """Блок — центром в точке нажатия, острие стрелки — в tip (сцена)."""
         it = self.temp
         it.prepareGeometryChange()
-        box = it.box()
-        x = p1.x() if p1.x() >= self.p0.x() else p1.x() - box.width()
-        pos = QPointF(x, p1.y() - box.height() / 2)
+        c = it.box().center()
+        pos = self.p0 - c
         it.setPos(pos)
-        it.tip = self.p0 - pos
+        it.tip = tip - pos
         it.update()
 
     def move(self, e):
@@ -372,7 +373,7 @@ class CalloutTool(Tool, _TempMixin):
                 self.view.viewport().update()
             return super().move(e)
         if e.left_down:
-            self._place(e.pos)
+            self._place(self.view.snap(e.pos, exclude=[self.temp]))
 
     def release(self, e):
         if getattr(self, "_edit", None) is not None:
@@ -383,19 +384,19 @@ class CalloutTool(Tool, _TempMixin):
             return
         if self.temp is None or e.button != Qt.LeftButton:
             return
-        p1 = e.pos if self.screen_dist(e.pos, self.p0) > MIN_SIZE_PX * 3 else self.p0 + QPointF(
-            60 / self.view.scale_factor(), -60 / self.view.scale_factor())
-        self._place(p1)
-        anchor_right = p1.x() >= self.p0.x()
+        if self.screen_dist(e.pos, self.p0) > MIN_SIZE_PX * 3:
+            tip = self.view.snap(e.pos, exclude=[self.temp])
+        else:   # просто клик — стрелка вниз-влево по умолчанию
+            k = 1.0 / self.view.scale_factor()
+            tip = self.p0 + QPointF(-70 * k, 70 * k)
+        self._place(tip)
         txt = self.ed.ask_text("", "Текст выноски")
         self.view.snap_hit = None
         if not txt:
             self._drop_temp()
             return
         self.temp.set_prop("text", txt)
-        # после смены текста ширина блока изменилась — поправим положение
-        if not anchor_right:
-            self._place(p1)
+        self._place(tip)          # размер блока изменился — центр остаётся в точке нажатия
         self._commit_temp(self.title)
 
     def cancel(self):

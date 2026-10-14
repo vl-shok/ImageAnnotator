@@ -775,3 +775,25 @@ def test_callout_anchor_snaps_and_edit_in_callout_tool(ed):
     assert c.leaders[0][1] == (1.0, 1.0)
     assert len(ed.doc.items()) == 1          # новая выноска не создалась
     assert ed.tool.name == "callout"
+
+
+def test_callout_tool_box_first_then_tip(ed):
+    from PySide6.QtCore import Qt
+    from annotator.canvas import CanvasView
+    from annotator.tools.base import ToolEvent
+    from annotator.tools.draw_tools import make_tools
+    view = CanvasView(ed)  # noqa: F841
+    for tl in make_tools(ed):
+        ed.register_tool(tl)
+    ed.ask_text = lambda initial, title="": "Проверить пайку"
+    ed.set_tool("callout")
+    t = ed.tool
+    box_at, tip_at = QPointF(500, 150), QPointF(250, 420)
+    t.press(ToolEvent(box_at, None, Qt.NoModifier, Qt.LeftButton, Qt.LeftButton))
+    t.move(ToolEvent(tip_at, None, Qt.NoModifier, Qt.NoButton, Qt.LeftButton))
+    t.release(ToolEvent(tip_at, None, Qt.NoModifier, Qt.LeftButton, Qt.NoButton))
+    c = [i for i in ed.doc.items() if i.TYPE == "callout"][0]
+    center = c.mapToScene(c.box().center())
+    tip = c.mapToScene(c.tip)
+    assert abs(center.x() - 500) < 1e-6 and abs(center.y() - 150) < 1e-6
+    assert abs(tip.x() - 250) < 1e-6 and abs(tip.y() - 420) < 1e-6
