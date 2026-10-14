@@ -585,8 +585,8 @@ class BreakItem(PathItem):
     TITLE = "Разрыв"
     DEFAULTS = {"color": "#ff2020", "width": 3.0, "gap": 10.0, "opacity": 1.0,
                 "fill_gap": False, "fill_color": "#ffffff",
-                "mark": "dots", "mark_color": "#ff2020", "mark_alpha": 0.7, "overhang": 15}
-    MARKS = [("none", "Нет"), ("dots", "Точки"), ("hatch", "Штриховка"), ("solid", "Заливка")]
+                "mark": "hatch", "mark_color": "#ff2020", "mark_alpha": 0.7, "overhang": 15}
+    MARKS = [("none", "Нет"), ("hatch", "Штриховка"), ("dots", "Точки"), ("solid", "Заливка")]
     PROPS = [
         PropSpec("color", "Цвет", "color", "Разрыв"),
         PropSpec("width", "Толщина", "float", "Разрыв", min=0.5, max=60, step=0.5, suffix=" px"),
@@ -602,7 +602,7 @@ class BreakItem(PathItem):
 
     def paint_mark(self, painter, a, b):
         """Подсветка вырезаемого участка: прямоугольник между чертами, черты выступают за него."""
-        kind = self.props.get("mark", "dots")
+        kind = self.props.get("mark", "hatch")
         if kind == "none":
             return
         dx, dy = b.x() - a.x(), b.y() - a.y()
