@@ -537,7 +537,7 @@ class MainWindow(QMainWindow):
 
     # ================================================================ image menu
     def raster_blur(self):
-        if self.ed._sel_rect() is None:
+        if self.ed.raster_target() is None:
             return
         from .ui.dialogs import BlurDialog
         BlurDialog(self, self.ed).exec()

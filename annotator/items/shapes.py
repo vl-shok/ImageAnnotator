@@ -961,8 +961,14 @@ class BoxItem(AnnotationItem):
         if self._drag_anchor is None or self._drag_anchor[0] != (hid, symmetric):
             tf = getattr(self, "_drag_tf", None)
             self._drag_anchor = ((hid, symmetric), tf.map(fixed_local) if tf is not None else self.mapToScene(fixed_local))
-        new = self._resize_from(r0, hid, p, constrain, keep_aspect=False, symmetric=symmetric)
+        keep = self.keep_aspect_for(hid, constrain)
+        new = self._resize_from(r0, hid, p, constrain and not self.SHIFT_FREES, keep_aspect=keep, symmetric=symmetric)
         self._apply_rect(new, fixed_local, self._drag_anchor[1])
+
+    SHIFT_FREES = False   # True — Shift снимает сохранение пропорций (а не делает квадрат)
+
+    def keep_aspect_for(self, hid: str, constrain: bool) -> bool:
+        return False
 
     def outline_path(self):
         path = QPainterPath()

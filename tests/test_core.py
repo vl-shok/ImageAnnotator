@@ -622,3 +622,56 @@ def test_break_gap_mark():
         edge = QColor(img.pixel(100, 25))       # выступ черт — без подсветки
         assert edge.green() > 240
         assert (tinted > 0) == (kind != "none")
+
+
+def _pasted(ed, color=QColor(200, 30, 30), w=100, h=50):
+    from annotator.items import ImageItem
+    img = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+    img.fill(color)
+    it = ImageItem(img)
+    it.setPos(100, 100)
+    ed.add_items([it])
+    ed.set_active_layer(it.layer_id)
+    return it
+
+
+def test_image_free_stretch_and_rotate(ed):
+    it = _pasted(ed)
+    assert len(it.handles()) == 9          # 8 ручек рамки + поворот
+    # сторона — свободное растяжение
+    it.begin_handle_drag(3)
+    it.move_handle(3, QPointF(200, 50))
+    assert abs(it.rect.width() - 200) < 1e-6 and abs(it.rect.height() - 50) < 1e-6
+    # угол — с пропорциями, Shift — свободно
+    it.begin_handle_drag(4)
+    it.move_handle(4, QPointF(400, 60))
+    assert abs(it.rect.width() / it.rect.height() - 4.0) < 1e-6
+    it.begin_handle_drag(4)
+    it.move_handle(4, QPointF(300, 200), constrain=True)
+    assert abs(it.rect.width() - 300) < 1e-6 and abs(it.rect.height() - 200) < 1e-6
+    # поворот пробелом
+    ed.sel.set([it])
+    c = it.content_rect().center()
+    ed.rotate_selected(45)
+    assert it.props["angle"] == 45 and abs(it.content_rect().center().x() - c.x()) < 1e-3
+
+
+def test_raster_ops_on_pasted_image(ed):
+    from PySide6.QtCore import QRect
+    it = _pasted(ed)
+    ed.raster_sel = None
+    ed.set_raster_selection(QRect(110, 110, 20, 20))
+    t = ed.raster_target()
+    assert t is not None and t[0] is it
+    img = ed.raster_copy_image()
+    assert img.width() == 20 and QColor(img.pixel(5, 5)).red() == 200
+    ed.raster_fill(QColor(0, 0, 255))
+    assert QColor(it.image.pixel(15, 15)).blue() == 255
+    ed.undo.undo()
+    assert QColor(it.image.pixel(15, 15)).red() == 200
+    ed.raster_delete()
+    assert QColor.fromRgba(it.image.pixel(15, 15)).alpha() == 0
+    ed.raster_blur(3.0)
+    # активный «Фон» — область берётся с фото
+    ed.set_active_layer("bg")
+    assert ed.raster_target()[0] is None

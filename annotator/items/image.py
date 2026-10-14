@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QGraphicsItem
 
 from ..props import OPACITY, PropSpec
 from .base import make_pen
-from .shapes import BoxItem
+from .shapes import ANGLE, BoxItem
 
 
 def image_to_b64(img: QImage, fmt: str = "PNG") -> str:
@@ -34,10 +34,13 @@ class ImageItem(BoxItem):
     """Вставленное изображение. Поддерживает неразрушающие коррекцию и обрезку (src)."""
     TYPE = "image"
     TITLE = "Изображение"
-    HANDLE_IDS = ("tl", "tr", "br", "bl")
-    DEFAULTS = {"opacity": 1.0, "border": False, "border_color": "#ff2020", "border_width": 2.0,
+    ROTATABLE = True
+    SHIFT_FREES = True
+    DEFAULTS = {"angle": 0.0, "keep_ratio": True, "opacity": 1.0, "border": False, "border_color": "#ff2020", "border_width": 2.0,
                 "brightness": 0, "contrast": 0, "saturation": 100, "temperature": 0, "curves": None}
     PROPS = [
+        ANGLE,
+        PropSpec("keep_ratio", "Сохранять пропорции (углы)", "bool", "Изображение"),
         PropSpec("border", "Рамка", "bool", "Изображение"),
         PropSpec("border_color", "Цвет рамки", "color", "Изображение"),
         PropSpec("border_width", "Толщина рамки", "float", "Изображение", min=0.5, max=50, step=0.5, suffix=" px"),
@@ -92,50 +95,62 @@ class ImageItem(BoxItem):
     # --------------------------------------------------------- crop
     def crop_to_scene_rect(self, scene_rect: QRectF):
         """Неразрушающая обрезка: видимая часть = пересечение с scene_rect."""
-        local = self.mapFromScene(scene_rect).boundingRect().intersected(self.rect)
-        if local.width() < 1 or local.height() < 1 or self.rect.width() <= 0 or self.rect.height() <= 0:
+        r = self.rect
+        local = self.mapFromScene(scene_rect).boundingRect().intersected(r)
+        if local.width() < 1 or local.height() < 1 or r.width() <= 0 or r.height() <= 0:
             return
-        sx = self.src.width() / self.rect.width()
-        sy = self.src.height() / self.rect.height()
-        self.prepareGeometryChange()
-        self.src = QRectF(self.src.x() + (local.x() - self.rect.x()) * sx,
-                          self.src.y() + (local.y() - self.rect.y()) * sy,
+        sx = self.src.width() / r.width()
+        sy = self.src.height() / r.height()
+        self.src = QRectF(self.src.x() + (local.x() - r.x()) * sx,
+                          self.src.y() + (local.y() - r.y()) * sy,
                           local.width() * sx, local.height() * sy)
-        self.setPos(self.mapToScene(local.topLeft()))
-        self.rect = QRectF(0, 0, local.width(), local.height())
-        self.update()
+        anchor = self.mapToScene(local.topLeft())
+        self._apply_rect(QRectF(0, 0, local.width(), local.height()), QPointF(0, 0), anchor)
 
     def reset_crop(self):
-        """Вернуть полное изображение, сохранив текущий масштаб."""
-        if self.src.width() <= 0:
+        """Вернуть полное изображение, сохранив текущий масштаб и поворот."""
+        if self.src.width() <= 0 or self.src.height() <= 0:
             return
-        k = self.rect.width() / self.src.width()
-        self.prepareGeometryChange()
-        self.setPos(self.mapToScene(QPointF(-self.src.x() * k, -self.src.y() * k)))
-        self.rect = QRectF(0, 0, self.image.width() * k, self.image.height() * k)
+        r = self.rect
+        kx = r.width() / self.src.width()
+        ky = r.height() / self.src.height()
+        new = QRectF(r.x() - self.src.x() * kx, r.y() - self.src.y() * ky,
+                     self.image.width() * kx, self.image.height() * ky)
         self.src = QRectF(0, 0, self.image.width(), self.image.height())
-        self.update()
+        anchor = self.mapToScene(r.topLeft())
+        self._apply_rect(QRectF(0, 0, new.width(), new.height()), r.topLeft() - new.topLeft(), anchor)
 
     def is_cropped(self):
         return self.src != QRectF(0, 0, self.image.width(), self.image.height())
 
     # --------------------------------------------------------- handles
-    def handles(self):
+    def keep_aspect_for(self, hid, constrain):
+        """Углы — с сохранением пропорций (если включено), Shift — наоборот; стороны — свободно."""
+        if len(hid) != 2:
+            return False
+        return bool(self.props.get("keep_ratio", True)) != bool(constrain)
+
+    # --------------------------------------------------------- raster
+    def pixel_rect(self, scene_rect: QRectF):
+        """Область изображения (пиксели self.image) и локальный прямоугольник под scene_rect."""
         r = self.rect
-        return [r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft()]
+        if r.width() <= 0 or r.height() <= 0 or self.image.isNull():
+            return None, None
+        local = self.mapFromScene(QRectF(scene_rect)).boundingRect().intersected(r)
+        if local.width() < 1 or local.height() < 1:
+            return None, None
+        sx = self.src.width() / r.width()
+        sy = self.src.height() / r.height()
+        px = QRectF(self.src.x() + (local.x() - r.x()) * sx, self.src.y() + (local.y() - r.y()) * sy,
+                    local.width() * sx, local.height() * sy).toAlignedRect()
+        px = px.intersected(self.image.rect())
+        if px.isEmpty():
+            return None, None
+        return px, local
 
-    def handle_kinds(self):
-        return ["box"] * 4
-
-    def handle_cursor(self, idx):
-        return Qt.SizeFDiagCursor if idx in (0, 2) else Qt.SizeBDiagCursor
-
-    def move_handle(self, idx, p, constrain=False, symmetric=False):
-        """Углы масштабируют с сохранением пропорций; Shift — свободно, Alt — от центра."""
-        r0 = self._drag_rect or self.rect
-        hid = self.HANDLE_IDS[idx]
-        self.prepareGeometryChange()
-        self.rect = self._resize_from(r0, hid, p, False, keep_aspect=not constrain, symmetric=symmetric)
+    def set_image(self, img: QImage):
+        self.image = img
+        self._pix = None
         self.update()
 
     def filled_hit(self):

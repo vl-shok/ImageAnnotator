@@ -293,7 +293,12 @@ class CanvasView(QGraphicsView):
                 # короткий клик ПКМ в инструменте рисования: завершить/отменить построение
                 # и перейти к инструменту «Выбор» (созданный объект остаётся выделенным)
                 tool = self.ed.tool
-                if tool is not None and (tool.creation or tool.name == "crop"):
+                spos = self.mapToScene(ev.position().toPoint())
+                # выделение области: ПКМ внутри выделения — меню действий, иначе — выход в «Выбор»
+                in_area = (tool is not None and tool.name == "raster" and self.ed.raster_sel is not None
+                           and QRectF(self.ed.raster_sel).contains(spos))
+                if tool is not None and (tool.creation or tool.name == "crop" or
+                                         (tool.name == "raster" and not in_area)):
                     if tool.busy() and not tool.finish():
                         tool.cancel()
                     self.ed.set_tool("select")

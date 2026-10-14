@@ -145,7 +145,7 @@ class BlurDialog(QDialog):
         from PySide6.QtWidgets import QSlider
         self.ed = editor
         self.setWindowTitle("Размытие по Гауссу")
-        self.orig = (editor.doc.background, editor.doc.bg_source)
+        self.target = editor.raster_blur_begin()   # (изображение-объект | None, исходник, область)
         lay = QVBoxLayout(self)
         row = QHBoxLayout()
         row.addWidget(QLabel("Радиус:"))
@@ -177,16 +177,17 @@ class BlurDialog(QDialog):
 
     def _preview(self):
         from .. import imageops
-        r = self.ed._sel_rect()
-        if r is None:
+        if self.target is None:
             return
-        self.ed.doc.set_background(imageops.blur_rect(self.orig[0], r, self.sigma()), self.orig[1])
+        _, src, r = self.target
+        self.ed.raster_blur_show(self.target, imageops.blur_rect(src, r, self.sigma()))
 
     def done(self, r):
         self.timer.stop()
-        self.ed.doc.set_background(*self.orig)
-        if r == QDialog.Accepted:
-            self.ed.raster_blur(self.sigma(), original=self.orig[0])
+        if self.target is not None:
+            self.ed.raster_blur_show(self.target, self.target[1])
+            if r == QDialog.Accepted:
+                self.ed.raster_blur(self.sigma(), self.target)
         super().done(r)
 
 

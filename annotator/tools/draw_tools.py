@@ -433,7 +433,7 @@ class RasterSelectTool(Tool):
         return self.p0 is not None
 
     def hint(self):
-        return ("Выделите область фото. Ctrl+C — копировать, Ctrl+X — вырезать, Del — очистить, "
+        return ("Выделите область фото или вставленного изображения активного слоя. Ctrl+C — копировать, Ctrl+X — вырезать, Del — очистить, "
                 "меню «Изображение» — заливка, прозрачность, обрезка, «в объект»")
 
     def _clamp(self, p: QPointF):

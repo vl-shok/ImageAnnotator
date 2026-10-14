@@ -136,3 +136,22 @@ class AdjustCmd(QUndoCommand):
             return False
         self.after = other.after
         return True
+
+
+class ItemImageCmd(QUndoCommand):
+    """Изменение пикселей вставленного изображения (ImageItem.image)."""
+
+    def __init__(self, doc, item, before, after, text="Изображение"):
+        super().__init__(text)
+        self.doc = doc
+        self.item = item
+        self.before = before
+        self.after = after
+
+    def redo(self):
+        self.item.set_image(self.after)
+        self.doc.itemsChanged.emit()
+
+    def undo(self):
+        self.item.set_image(self.before)
+        self.doc.itemsChanged.emit()

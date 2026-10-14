@@ -8,11 +8,11 @@ import json
 import os
 import uuid
 
-from PySide6.QtCore import QMimeData, QObject, QPointF, QRect, QRectF, Signal
+from PySide6.QtCore import QMimeData, QObject, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QUndoStack
 
 from . import imageops, styles
-from .commands import AddCmd, AdjustCmd, LayersCmd, RasterCmd, RemoveCmd, StateCmd
+from .commands import AddCmd, AdjustCmd, ItemImageCmd, LayersCmd, RasterCmd, RemoveCmd, StateCmd
 from .document import BG_LAYER_ID, Document, Layer
 from .items import ImageItem, create_from_dict
 from .selection import SelectionManager
@@ -257,7 +257,7 @@ class Editor(QObject):
         movable = [i for i in self.sel.items if self.sel.is_movable(i)]
         items = [i for i in movable if i.can_rotate()]
         if len(items) < len(movable):
-            self.message.emit("Изображения и лупа не поворачиваются пробелом")
+            self.message.emit("Лупа не поворачивается пробелом")
         if not items:
             return
         center = None
@@ -618,47 +618,118 @@ class Editor(QObject):
         r = self.raster_sel.intersected(QRect(0, 0, self.doc.background.width(), self.doc.background.height()))
         return None if r.isEmpty() else r
 
-    def raster_copy(self):
+    def raster_target(self):
+        """Что редактирует выделение области: (ImageItem | None, пиксельный QRect, локальный QRectF | None).
+        Если активен слой с объектами и под выделением есть вставленное изображение этого слоя —
+        работаем с ним (верхним), иначе — с фото (фоном)."""
+        if self.raster_sel is None:
+            return None
+        lid = self.doc.active_layer_id
+        layer = self.doc.layer(lid)
+        pools = []
+        if layer is not None and not layer.is_bg:   # активен «Фон» — всегда работаем с фото
+            if layer.visible:
+                pools.append([i for i in self.doc.items() if i.layer_id == lid])
+            pools.append(list(self.sel.items))   # или выделенное изображение с другого слоя
+        for pool in pools:
+            best = None
+            for i in pool:
+                if i.TYPE != "image" or not i.isVisible():
+                    continue
+                px, local = i.pixel_rect(QRectF(self.raster_sel))
+                if px is not None and (best is None or i.zValue() > best[0].zValue()):
+                    best = (i, px, local)
+            if best is not None:
+                return best
         r = self._sel_rect()
-        if r is None:
+        return (None, r, None) if r is not None else None
+
+    def _item_image_change(self, item, new_img, text):
+        if item.locked:
+            self.message.emit("Изображение заблокировано (Ctrl+L — разблокировать)")
             return
-        QGuiApplication.clipboard().setImage(self.doc.display_image.copy(r))
-        self.message.emit(f"Скопирована область {r.width()}×{r.height()}")
+        self.push(ItemImageCmd(self.doc, item, item.image, new_img, text))
+
+    def _raster_apply(self, fn, text):
+        """fn(QImage, QRect) -> QImage — к фону или к вставленному изображению."""
+        t = self.raster_target()
+        if t is None:
+            return
+        item, r, _ = t
+        if item is None:
+            self._raster_change(fn(self.doc.background, r), text)
+        else:
+            self._item_image_change(item, fn(item.image, r), text)
+
+    def raster_copy_image(self) -> QImage | None:
+        t = self.raster_target()
+        if t is None:
+            return None
+        item, r, local = t
+        if item is None:
+            return self.doc.display_image.copy(r)
+        img = imageops.apply_color(item.image, item.color_params()).copy(r)
+        w, h = max(1, round(local.width())), max(1, round(local.height()))
+        if (w, h) != (img.width(), img.height()):
+            img = img.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        return img
+
+    def raster_copy(self):
+        img = self.raster_copy_image()
+        if img is None:
+            return
+        QGuiApplication.clipboard().setImage(img)
+        self.message.emit(f"Скопирована область {img.width()}×{img.height()}")
 
     def raster_delete(self):
-        r = self._sel_rect()
-        if r is None:
+        t = self.raster_target()
+        if t is None:
             return
-        self._raster_change(imageops.fill_rect(self.doc.background, r, QColor(self.doc.canvas_color)), "Очистить область")
+        if t[0] is None:
+            self._raster_change(imageops.fill_rect(self.doc.background, t[1], QColor(self.doc.canvas_color)),
+                                "Очистить область")
+        else:   # во вставленном изображении — прозрачная «дыра»
+            self._item_image_change(t[0], imageops.set_rect_opacity(t[0].image, t[1], 0.0), "Очистить область")
 
     def raster_cut(self):
         self.raster_copy()
         self.raster_delete()
 
     def raster_fill(self, color: QColor):
-        r = self._sel_rect()
-        if r is None:
-            return
-        self._raster_change(imageops.fill_rect(self.doc.background, r, color), "Заливка области")
+        self._raster_apply(lambda img, r: imageops.fill_rect(img, r, color), "Заливка области")
 
     def raster_opacity(self, value: float):
-        r = self._sel_rect()
-        if r is None:
-            return
-        self._raster_change(imageops.set_rect_opacity(self.doc.background, r, value), "Прозрачность области")
+        self._raster_apply(lambda img, r: imageops.set_rect_opacity(img, r, value), "Прозрачность области")
 
     def raster_to_object(self):
         """Скопировать выделенную область в новый объект-изображение (на месте)."""
-        r = self._sel_rect()
-        if r is None:
+        t = self.raster_target()
+        if t is None:
             return
-        img = self.doc.display_image.copy(r)
-        item = ImageItem(img)
-        item.setPos(QPointF(r.topLeft()))
-        self.add_items([item], "Область → объект")
+        item, r, local = t
+        if item is None:
+            new = ImageItem(self.doc.display_image.copy(r))
+            new.setPos(QPointF(r.topLeft()))
+        else:
+            new = ImageItem(item.image.copy(r))
+            for k in ("brightness", "contrast", "saturation", "temperature", "curves", "keep_ratio"):
+                new.props[k] = copy.deepcopy(item.props.get(k))
+            new.layer_id = item.layer_id
+            new.rect = QRectF(0, 0, local.width(), local.height())
+            new.props["angle"] = item.angle()
+            new.setPos(item.mapToScene(local.topLeft()))
+            new.setTransformOriginPoint(new.rect.center())
+            new.setRotation(new.angle())
+            new.setPos(new.pos() + (item.mapToScene(local.topLeft()) - new.mapToScene(QPointF(0, 0))))
+        self.add_items([new], "Область → объект")
         self.set_tool("select")
 
     def crop_to_selection(self):
+        t = self.raster_target()
+        if t is not None and t[0] is not None:
+            self.crop_image_item(t[0], QRectF(self.raster_sel))
+            self.set_raster_selection(None)
+            return
         r = self._sel_rect()
         if r is None:
             return
@@ -705,21 +776,31 @@ class Editor(QObject):
         self.set_background_color(copy.deepcopy(self.doc.color), copy.deepcopy(imageops.DEFAULT_COLOR))
 
     # ================================================================ raster: blur
-    def raster_blur_preview(self, sigma):
-        """Вернуть изображение с размытой областью (без записи в историю)."""
-        r = self._sel_rect()
-        if r is None:
+    def raster_blur_begin(self):
+        """Для окна размытия: (цель, исходное изображение, область) или None."""
+        t = self.raster_target()
+        if t is None:
             return None
-        return imageops.blur_rect(self.doc.background, r, sigma)
+        item, r, _ = t
+        return item, (item.image if item is not None else self.doc.background), r
 
-    def raster_blur(self, sigma, original=None):
-        r = self._sel_rect()
-        if r is None:
+    def raster_blur_show(self, target, img):
+        item = target[0]
+        if item is None:
+            self.doc.set_background(img, self.doc.bg_source)
+        else:
+            item.set_image(img)
+
+    def raster_blur(self, sigma, target=None):
+        target = target or self.raster_blur_begin()
+        if target is None:
             return
-        src = original if original is not None else self.doc.background
+        item, src, r = target
         out = imageops.blur_rect(src, r, sigma)
-        before = (src, self.doc.bg_source)
-        self.push(RasterCmd(self.doc, before, (out, None), "Размытие по Гауссу"))
+        if item is None:
+            self.push(RasterCmd(self.doc, (src, self.doc.bg_source), (out, None), "Размытие по Гауссу"))
+        else:
+            self._item_image_change(item, out, "Размытие по Гауссу")
 
     # ================================================================ crop / canvas
     def crop_canvas_to(self, rect: QRectF, color: QColor | None = None):
