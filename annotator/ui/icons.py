@@ -305,20 +305,68 @@ def small_icon(name: str, size: int = 15, canvas: QSize = QSize(40, 28)) -> QIco
     return ic
 
 
-def app_icon() -> QIcon:
-    pm = QPixmap(64, 64)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
+APP_ICON_THEMES = {
+    # фон (верх, низ), рамка фона, «фото», горы, солнце, стрелка/акцент
+    "gray_orange": ("#5b5f66", "#3c3f44", "#2c2e32", "#e9eaec", "#a9adb3", "#f5a142", "#f28a1f"),
+    "white_gray": ("#ffffff", "#e3e5e8", "#9a9ea5", "#f6f7f8", "#b9bdc3", "#9a9ea5", "#55595f"),
+    "pastel": ("#a9c8e8", "#8fb3dc", "#7f9fc6", "#fbfcfe", "#c9bce0", "#ffc9a0", "#e88f8f"),
+}
+APP_ICON_THEME = "gray_orange"
+
+
+def paint_app_icon(p: QPainter, size: float, theme: str = None):
+    """Значок программы: фотография с акцентной стрелкой-пометкой и маркером."""
+    from PySide6.QtGui import QLinearGradient
+    bg1, bg2, frame, photo, hills, sun, accent = APP_ICON_THEMES[theme or APP_ICON_THEME]
+    p.save()
+    p.scale(size / 64.0, size / 64.0)
     p.setRenderHint(QPainter.Antialiasing)
-    p.setBrush(QColor(28, 90, 60))
-    p.setPen(QPen(QColor(200, 170, 60), 3))
-    p.drawRoundedRect(QRectF(4, 4, 56, 56), 8, 8)
-    p.setPen(QPen(QColor(200, 170, 60), 2.5))
-    for x in (16, 28, 40):
-        p.drawLine(QPointF(x, 46), QPointF(x, 54))
+    g = QLinearGradient(0, 2, 0, 62)
+    g.setColorAt(0, QColor(bg1))
+    g.setColorAt(1, QColor(bg2))
+    p.setPen(QPen(QColor(frame), 1.5))
+    p.setBrush(g)
+    p.drawRoundedRect(QRectF(2.5, 2.5, 59, 59), 12, 12)
+    # «фото»
+    ph = QRectF(10, 13, 40, 32)
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor(255, 70, 60))
-    p.drawPolygon(QPolygonF([QPointF(14, 40), QPointF(36, 22), QPointF(31, 17), QPointF(50, 10),
-                             QPointF(43, 29), QPointF(38, 24), QPointF(17, 44)]))
-    p.end()
-    return QIcon(pm)
+    p.setBrush(QColor(0, 0, 0, 45))
+    p.drawRoundedRect(ph.translated(1.2, 1.6), 3, 3)
+    p.setBrush(QColor(photo))
+    p.drawRoundedRect(ph, 3, 3)
+    p.save()
+    p.setClipRect(ph.adjusted(3, 3, -3, -3))
+    p.setBrush(QColor(hills))
+    p.drawPolygon(QPolygonF([QPointF(12, 43), QPointF(24, 28), QPointF(31, 36), QPointF(37, 30),
+                             QPointF(49, 43)]))
+    p.setBrush(QColor(sun))
+    p.drawEllipse(QPointF(39.5, 21.5), 3.6, 3.6)
+    p.restore()
+    # стрелка-пометка
+    pen = QPen(QColor(accent), 4.2)
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+    p.drawLine(QPointF(54, 54), QPointF(37, 37))
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(accent))
+    p.drawPolygon(QPolygonF([QPointF(31, 31), QPointF(44.5, 34.5), QPointF(34.5, 44.5)]))
+    # маркер-номер
+    p.setBrush(QColor(accent))
+    p.setPen(QPen(QColor(photo), 1.6))
+    p.drawEllipse(QPointF(15, 49), 6.2, 6.2)
+    p.setPen(QPen(QColor(photo), 2.0))
+    p.drawLine(QPointF(15.6, 45.8), QPointF(15.6, 52.3))
+    p.drawLine(QPointF(15.6, 45.8), QPointF(13.6, 47.4))
+    p.restore()
+
+
+def app_icon(theme: str = None) -> QIcon:
+    ic = QIcon()
+    for sz in (16, 24, 32, 48, 64, 128, 256):
+        pm = QPixmap(sz, sz)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        paint_app_icon(p, sz, theme)
+        p.end()
+        ic.addPixmap(pm)
+    return ic
