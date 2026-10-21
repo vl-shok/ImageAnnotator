@@ -77,6 +77,9 @@ def fill_props():
     ]
 
 
+LINE_SPACING = PropSpec("line_spacing", "Межстрочный", "float", S_TEXT, min=0.5, max=3.0, step=0.1, suffix="×")
+
+
 def text_props(with_text=True, valign=False):
     out = []
     if with_text:
@@ -89,6 +92,7 @@ def text_props(with_text=True, valign=False):
                  pair=PropSpec("italic", "Курсив", "toggle", icon="I", tip="Курсив")),
         PropSpec("align", "Выравнивание", "align", S_TEXT, options=ALIGNS,
                  pair=PropSpec("valign", "По вертикали", "align", options=VALIGNS) if valign else None),
+        LINE_SPACING,
         PropSpec("bg", "Подложка", "bool", S_BG),
         PropSpec("bg_color", "Цвет подложки", "color", S_BG),
         PropSpec("bg_opacity", "Прозр. подложки", "opacity", S_BG),

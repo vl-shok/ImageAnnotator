@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QTextLayout, QTextOption
 
 from ..geometry import dist, rect_snap_points
 from ..props import CAP_STYLES, OPACITY, S_LEADER, PropSpec, cap_size, text_props
@@ -26,6 +26,72 @@ def make_font(props) -> QFont:
 VALIGN_FLAGS = {"top": Qt.AlignTop, "middle": Qt.AlignVCenter, "bottom": Qt.AlignBottom}
 
 
+def line_spacing(props) -> float:
+    """Межстрочный интервал (множитель высоты строки; 1.0 — как обычно)."""
+    try:
+        return max(0.3, float(props.get("line_spacing", 1.0) or 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _text_lines(text: str, font: QFont, wrap_w: float | None):
+    """Строки текста (с переносом по словам, если задана ширина): [(QTextLayout, QTextLine)]."""
+    out = []
+    for para in text.split("\n"):
+        tl = QTextLayout(para.replace("\t", "    "), font)
+        opt = QTextOption()
+        opt.setWrapMode(QTextOption.WordWrap if wrap_w else QTextOption.NoWrap)
+        tl.setTextOption(opt)
+        tl.beginLayout()
+        while True:
+            ln = tl.createLine()
+            if not ln.isValid():
+                break
+            ln.setLineWidth(wrap_w if wrap_w else 1e6)
+            ln.setPosition(QPointF(0, 0))
+        tl.endLayout()
+        out += [(tl, tl.lineAt(i)) for i in range(tl.lineCount())]
+    return out
+
+
+def text_block_size(text: str, font: QFont, spacing: float, wrap_w: float | None = None):
+    """(ширина, высота) многострочного текста с межстрочным интервалом spacing."""
+    fm = QFontMetricsF(font)
+    lines = _text_lines(text, font, wrap_w)
+    w = max((ln.naturalTextWidth() for _, ln in lines), default=0.0)
+    h = fm.height() + fm.lineSpacing() * spacing * (max(1, len(lines)) - 1)   # 1.0 — как у Qt
+    return w, h
+
+
+def draw_text_block(painter: QPainter, rect: QRectF, flags, text: str, font: QFont, spacing: float):
+    """Как painter.drawText(rect, flags, text), но с межстрочным интервалом spacing."""
+    flags = int(flags)
+    if abs(spacing - 1.0) < 1e-6:
+        painter.drawText(rect, flags, text)
+        return
+    fm = QFontMetricsF(font)
+    wrap_w = rect.width() if flags & int(Qt.TextWordWrap) else None
+    lines = _text_lines(text, font, wrap_w)
+    step = fm.lineSpacing() * spacing
+    total = fm.height() + step * (max(1, len(lines)) - 1)
+    if flags & int(Qt.AlignBottom):
+        y = rect.bottom() - total
+    elif flags & int(Qt.AlignVCenter):
+        y = rect.center().y() - total / 2
+    else:
+        y = rect.top()
+    painter.setFont(font)
+    for i, (_, ln) in enumerate(lines):
+        lw = ln.naturalTextWidth()
+        if flags & int(Qt.AlignRight):
+            x = rect.right() - lw
+        elif flags & int(Qt.AlignHCenter):
+            x = rect.center().x() - lw / 2
+        else:
+            x = rect.left()
+        ln.draw(painter, QPointF(x, y + i * step))
+
+
 def layout_text(props, fixed=None):
     """Возвращает (box, text_rect, flags, font) в локальных координатах (box начинается в 0,0).
     fixed=(w, h) — размер блока задан пользователем (текст переносится по словам)."""
@@ -38,9 +104,14 @@ def layout_text(props, fixed=None):
     if fixed is not None:
         box = QRectF(0, 0, max(4.0, fixed[0]), max(4.0, fixed[1]))
         return box, box.adjusted(pad, pad, -pad, -pad), flags | Qt.TextWordWrap, font
-    br = fm.boundingRect(QRectF(0, 0, 1e6, 1e6), int(Qt.AlignLeft | Qt.AlignTop | Qt.TextExpandTabs), text)
-    w = br.width() + (fm.averageCharWidth() * 0.3 if props.get("italic") else 0) + 1
-    h = max(br.height(), fm.height())
+    sp = line_spacing(props)
+    if abs(sp - 1.0) < 1e-6:
+        br = fm.boundingRect(QRectF(0, 0, 1e6, 1e6), int(Qt.AlignLeft | Qt.AlignTop | Qt.TextExpandTabs), text)
+        bw, bh = br.width(), br.height()
+    else:
+        bw, bh = text_block_size(text, font, sp)
+    w = bw + (fm.averageCharWidth() * 0.3 if props.get("italic") else 0) + 1
+    h = max(bh, fm.height())
     box = QRectF(0, 0, w + 2 * pad, h + 2 * pad)
     return box, box.adjusted(pad, pad, -pad, -pad), flags, font
 
@@ -56,7 +127,7 @@ def paint_text_box(painter: QPainter, props, box, trect, flags, font, border_col
         painter.drawRoundedRect(box, 3, 3)
     painter.setFont(font)
     painter.setPen(QColor(props.get("color", "#000000")))
-    painter.drawText(trect, int(flags), props.get("text", ""))
+    draw_text_block(painter, trect, flags, props.get("text", ""), font, line_spacing(props))
 
 
 # =====================================================================
@@ -67,7 +138,7 @@ class TextItem(AnnotationItem):
     TYPE = "text"
     TITLE = "Текст"
     ROT_HANDLE_PX = 26
-    DEFAULTS = {"text": "ТЕКСТ", "font": DEFAULT_FONT, "size": 24, "bold": True, "italic": False,
+    DEFAULTS = {"text": "ТЕКСТ", "font": DEFAULT_FONT, "size": 24, "bold": True, "italic": False, "line_spacing": 1.0,
                 "color": "#ff2020", "align": "center", "valign": "middle", "bg": True, "bg_color": "#ffffff",
                 "bg_opacity": 0.8, "padding": 4, "border": False, "border_color": "#ff2020",
                 "border_width": 2.0, "angle": 0.0, "auto_size": True, "box_w": 0.0, "box_h": 0.0,
@@ -268,7 +339,7 @@ class CalloutItem(AnnotationItem):
     """
     TYPE = "callout"
     TITLE = "Выноска"
-    DEFAULTS = {"text": "Комментарий", "font": DEFAULT_FONT, "size": 18, "bold": False, "italic": False,
+    DEFAULTS = {"text": "Комментарий", "font": DEFAULT_FONT, "size": 18, "bold": False, "italic": False, "line_spacing": 1.0,
                 "color": "#000000", "align": "left", "bg": True, "bg_color": "#fff7c2",
                 "bg_opacity": 0.95, "padding": 6, "opacity": 1.0,
                 "line_color": "#ff2020", "line_width": 2.5, "tip": "arrow", "tip_size": 14.0, "border": True}

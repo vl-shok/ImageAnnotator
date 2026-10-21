@@ -1282,3 +1282,36 @@ def test_resistor_label_size(ed):
     for size in (12, 30, 90):
         r.set_prop("size", size)
         assert r.label_font().pixelSize() == size
+
+
+def test_line_spacing_text_callout_resistor(ed):
+    from PySide6.QtGui import QFontMetricsF, QPainter
+    from annotator.items import ResistorItem
+    from annotator.items.text import make_font
+    t = TextItem({"text": "Строка 1\nСтрока 2\nСтрока 3", "size": 20, "padding": 0})
+    ed.add_items([t])
+    fh = QFontMetricsF(make_font(t.props)).lineSpacing()
+    h1 = t.box().height()
+    t.set_prop("line_spacing", 2.0)
+    h2 = t.box().height()
+    assert abs((h2 - h1) - 2 * fh) < 1.5          # 3 строки: два интервала стали вдвое больше
+    t.set_prop("line_spacing", 0.7)
+    assert t.box().height() < h1
+    # отрисовка (в т.ч. с переносом в заданной рамке) не падает
+    img = QImage(400, 300, QImage.Format_ARGB32_Premultiplied)
+    for it in (t, CalloutItem({"text": "А\nБ", "line_spacing": 1.6}),
+               ResistorItem(QRectF(0, 0, 160, 80), {"show_text": True, "text": "R1\n10k", "line_spacing": 1.5})):
+        p = QPainter(img)
+        it.paint(p, None)
+        p.end()
+    t.set_prop("auto_size", False)
+    t.set_prop("box_w", 60.0)
+    p = QPainter(img)
+    t.paint(p, None)
+    p.end()
+    assert "line_spacing" in [s.name for s in CalloutItem.PROPS]
+    # резистор: две строки с бо́льшим интервалом — авторазмер шрифта меньше
+    r = ResistorItem(QRectF(0, 0, 160, 80), {"show_text": True, "text": "R1\n10k"})
+    s1 = r.label_font().pixelSize()
+    r.set_prop("line_spacing", 1.8)
+    assert r.label_font().pixelSize() < s1

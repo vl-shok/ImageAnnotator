@@ -8,7 +8,7 @@ from ..geometry import rect_snap_points
 from ..props import LINE_STYLES, OPACITY, PropSpec
 from .base import make_pen, qcolor
 from .shapes import ANGLE, BoxItem
-from .text import DEFAULT_FONT, make_font
+from .text import DEFAULT_FONT, draw_text_block, line_spacing, make_font, text_block_size
 
 S_BODY = "Корпус"
 S_PADS = "Выводы"
@@ -24,7 +24,7 @@ class ResistorItem(BoxItem):
     DEFAULTS = {"color": "#ff2020", "width": 2.5, "style": "solid",
                 "fill": True, "fill_color": "#ffd800", "fill_opacity": 0.25,
                 "pad_len": 22, "pad_color": "#ff2020", "pad_opacity": 0.55,
-                "show_text": False, "text": "R1", "font": DEFAULT_FONT, "auto_size": True, "size": 18, "bold": True,
+                "show_text": False, "text": "R1", "font": DEFAULT_FONT, "auto_size": True, "size": 18, "bold": True, "line_spacing": 1.0,
                 "text_color": "#ff2020", "angle": 0.0, "opacity": 1.0}
     PROPS = [
         PropSpec("color", "Цвет контура", "color", S_BODY),
@@ -43,6 +43,7 @@ class ResistorItem(BoxItem):
         PropSpec("size", "Размер", "int", S_LABEL, min=4, max=600, suffix=" px"),
         PropSpec("text_color", "Цвет текста", "color", S_LABEL),
         PropSpec("bold", "Жирный", "bool", S_LABEL),
+        PropSpec("line_spacing", "Межстрочный", "float", S_LABEL, min=0.5, max=3.0, step=0.1, suffix="×"),
         ANGLE,
         OPACITY,
     ]
@@ -166,18 +167,16 @@ class ResistorItem(BoxItem):
         if avail_w <= 1 or avail_h <= 1:
             return None
         font.setPixelSize(100)
-        w, h = self._text_size(font, text)
+        w, h = self._text_size(font, text, line_spacing(p))
         k = min(avail_w / max(w, 1e-6), avail_h / max(h, 1e-6))
         font.setPixelSize(max(1, int(100 * k)))
         return font
 
     @staticmethod
-    def _text_size(font, text):
-        fm = QFontMetricsF(font)
+    def _text_size(font, text, spacing=1.0):
         if "\n" in text:
-            r = fm.boundingRect(QRectF(0, 0, 1e6, 1e6), int(Qt.AlignCenter), text)
-        else:
-            r = fm.tightBoundingRect(text)
+            return text_block_size(text, font, spacing)
+        r = QFontMetricsF(font).tightBoundingRect(text)
         return r.width(), r.height()
 
     def _paint_label(self, painter):
@@ -195,7 +194,8 @@ class ResistorItem(BoxItem):
         fm = QFontMetricsF(font)
         if "\n" in text:
             big = 1e5
-            painter.drawText(QRectF(-big / 2, -big / 2, big, big), int(Qt.AlignCenter), text)
+            draw_text_block(painter, QRectF(-big / 2, -big / 2, big, big), Qt.AlignCenter, text, font,
+                            line_spacing(p))
         else:
             # центр по самим буквам (без пустого места строки над и под ними)
             t = fm.tightBoundingRect(text)
