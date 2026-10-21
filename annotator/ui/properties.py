@@ -165,6 +165,16 @@ class PropertiesPanel(QScrollArea):
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             b.clicked.connect(lambda: [self.ed.straighten(i) for i in bent])
             sec.add_row("", b)
+        res = [i for i in items if i.TYPE == "resistor" and not i.locked]
+        if res:
+            sec = sections.get("Корпус") or Section("Корпус")
+            b = QToolButton()
+            b.setText("1 : 2")
+            b.setToolTip("Длина корпуса = 2 × ширина (длинная сторона и центр сохраняются; также ПКМ по резистору). "
+                         "Shift во время растягивания маркера — сохранить пропорции")
+            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            b.clicked.connect(lambda: self.ed.resistor_aspect(res))
+            sec.add_row("Пропорции", b)
         if len(items) == 1 and items[0].TYPE == "image":
             it = items[0]
             sec = sections.get("Изображение") or Section("Изображение")

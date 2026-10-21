@@ -11,7 +11,7 @@ from PySide6.QtGui import QColor, QPen
 
 from ..geometry import constrain_angle, dist
 from ..items import (ArrowItem, BreakItem, CalloutItem, DimensionItem, MagnifierItem, EllipseItem, FreehandItem, LineItem, NumberItem,
-                     PolygonItem, PolylineItem, RectItem, TextItem)
+                     PolygonItem, PolylineItem, RectItem, ResistorItem, TextItem)
 from .base import Tool, ToolEvent
 
 MIN_SIZE_PX = 4
@@ -55,7 +55,8 @@ class TwoPointTool(Tool, _TempMixin):
     def hint(self):
         if self.box:
             centre = "Alt — от угла" if getattr(self.cls, "CREATE_FROM_CENTER", False) else "Alt — от центра"
-            return f"Тяните мышью (или клик–клик). Shift — квадрат/круг, {centre}. ПКМ — к «Выбору»"
+            shift = "пропорции 1:2" if getattr(self.cls, "ASPECT", None) else "квадрат/круг"
+            return f"Тяните мышью (или клик–клик). Shift — {shift}, {centre}. ПКМ — к «Выбору»"
         return "Тяните мышью (или клик–клик). Shift — угол 0/45/90°. Esc — отмена"
 
     def press(self, e: ToolEvent):
@@ -599,6 +600,7 @@ def make_tools(editor):
         NumberTool(editor),
         TwoPointTool(editor, RectItem, "rect", "Прямоугольник", "R", box=True),
         TwoPointTool(editor, EllipseItem, "ellipse", "Эллипс", "E", box=True),
+        TwoPointTool(editor, ResistorItem, "resistor", "Резистор (место компонента)", "Q", box=True),
         PolyTool(editor, PolylineItem, "polyline", "Полилиния", "P"),
         PolyTool(editor, PolygonItem, "polygon", "Полигон", "G"),
         FreehandTool(editor),

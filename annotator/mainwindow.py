@@ -29,7 +29,7 @@ PRJ_FILTER = f"Проект ImageAnnotator (*{PROJECT_EXT})"
 HOTKEYS = [
     ("Инструменты", ""),
     ("V", "Выбор"), ("M", "Выделение области фото"), ("K", "Обрезка / размер холста (и вставленного изображения)"), ("A", "Стрелка"), ("L", "Линия"), ("T", "Текст"),
-    ("C", "Выноска"), ("N", "Нумерация"), ("R", "Прямоугольник"), ("E", "Эллипс"), ("P", "Полилиния"),
+    ("C", "Выноска"), ("N", "Нумерация"), ("R", "Прямоугольник"), ("E", "Эллипс"), ("Q", "Резистор (место компонента)"), ("P", "Полилиния"),
     ("G", "Полигон"), ("F", "Карандаш"), ("D", "Размер (расстояние)"), ("B", "Разрыв цепи"),
     ("Z", "Выносной вид (лупа): выделите область — рядом появится увеличение"),
     ("Навигация", ""),
@@ -178,7 +178,7 @@ class MainWindow(QMainWindow):
         self.tool_group = QActionGroup(self)
         self.tool_group.setExclusive(True)
         icons = {"select": "select", "raster": "raster", "crop": "crop", "dimension": "dimension", "break": "break", "magnifier": "magnifier", "arrow": "arrow", "line": "line", "text": "text",
-                 "callout": "callout", "number": "number", "rect": "rect", "ellipse": "ellipse",
+                 "callout": "callout", "number": "number", "rect": "rect", "ellipse": "ellipse", "resistor": "resistor",
                  "polyline": "polyline", "polygon": "polygon", "freehand": "freehand"}
         for name, tool in ed.tools.items():
             a = A(f"tool_{name}", tool.title, (lambda n: (lambda: ed.set_tool(n)))(name), tool.shortcut,
@@ -251,7 +251,8 @@ class MainWindow(QMainWindow):
         tb.setOrientation(Qt.Vertical)
         self.addToolBar(Qt.LeftToolBarArea, tb)
         order = ["select", "raster", "crop", None, "arrow", "line", "text", "callout", "number", None,
-                 "rect", "ellipse", "polyline", "polygon", "freehand", None, "dimension", "break", "magnifier"]
+                 "rect", "ellipse", "polyline", "polygon", "freehand", None, "dimension", "break", "magnifier",
+                 "resistor"]
         for n in order:
             if n is None:
                 tb.addSeparator()
@@ -667,6 +668,11 @@ class MainWindow(QMainWindow):
                 if ed.sel.items[0].TYPE == "callout":
                     co = ed.sel.items[0]
                     m.addAction("Добавить стрелку", lambda: ed.begin_add_leader(co))
+                m.addSeparator()
+            res = [i for i in ed.sel.items if i.TYPE == "resistor"]
+            if res:
+                a = m.addAction("Соотношение сторон 1 : 2", lambda: ed.resistor_aspect(res))
+                a.setEnabled(any(not i.locked for i in res))
                 m.addSeparator()
             for k in ("cut", "copy", "paste", "duplicate", "delete"):
                 m.addAction(self.acts[k])

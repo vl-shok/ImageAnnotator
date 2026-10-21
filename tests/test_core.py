@@ -1146,6 +1146,42 @@ def test_pencil_brush_circle_follows_width(ed):
     assert t.brush_width() == float(t.temp.props["width"])
 
 
+def test_resistor_tool_and_item(ed):
+    from annotator.items import ResistorItem
+    _tools_view(ed)
+    ed.set_tool("resistor")
+    _drag(ed.tool, QPointF(100, 100), QPointF(220, 150))
+    r = [i for i in ed.doc.items() if i.TYPE == "resistor"][0]
+    assert r.horizontal()
+    a, b = r.pads()
+    assert abs(a.width() - 120 * r.props["pad_len"] / 100) < 1e-6 and a.left() == r.rect.left()
+    assert abs(b.right() - r.rect.right()) < 1e-6
+    # центры площадок — точки привязки
+    centers = [p for p, k in r.snap_points() if k == "center"]
+    assert r.mapToScene(a.center()) in [r.mapToScene(c) for c in centers]
+    # текст внутри включается галочкой; ввод текста сам её включает
+    assert not r.props["show_text"]
+    ed.sel.set([r])
+    ed.set_prop("text", "R12 10k")
+    assert r.props["show_text"]
+    ed.undo.undo()
+    assert not r.props["show_text"] and r.props["text"] == "R1"
+    # масштабирование ручкой (правый нижний угол) — площадки пересчитываются
+    r.begin_handle_drag(4)
+    r.move_handle(4, QPointF(r.rect.left() + 40, r.rect.top() + 160))
+    assert not r.horizontal()
+    a, b = r.pads()
+    assert a.top() == r.rect.normalized().top() and abs(a.width() - r.rect.width()) < 1e-6
+    # сохранение и загрузка
+    r.set_prop("show_text", True)
+    r2 = ResistorItem()
+    r2.apply_dict(r.to_dict(full=True))
+    assert r2.rect == r.rect and r2.props["show_text"]
+    # поворот холста — резистор поворачивается вместе с фото
+    ed.transform_canvas("cw")
+    assert r.props["angle"] == 90
+
+
 def _corner(item, hid):
     return item.mapToScene(item.handles()[item.HANDLE_IDS.index(hid)])
 
@@ -1181,3 +1217,50 @@ def test_rect_resize_shift_keeps_aspect_not_square(ed):
         _drag_shift_late(ed.tool, b, b + QPointF(0, 30))     # нижняя сторона с Shift — тоже пропорционально
         assert abs(it.rect.width() / it.rect.height() - ratio) < 1e-4
         ed.doc.remove_item(it)
+
+
+def test_resistor_aspect(ed):
+    from PySide6.QtCore import Qt
+    _tools_view(ed)
+    # рисование с Shift — сразу 1:2 вдоль направления
+    ed.set_tool("resistor")
+    _drag(ed.tool, QPointF(100, 100), QPointF(260, 130), Qt.ShiftModifier)
+    r = [i for i in ed.doc.items() if i.TYPE == "resistor"][0]
+    assert (r.rect.width(), r.rect.height()) == (160, 80)
+    _drag(ed.tool, QPointF(400, 100), QPointF(420, 300), Qt.ShiftModifier)
+    rv = [i for i in ed.doc.items_sorted() if i.TYPE == "resistor"][-1]
+    assert (rv.rect.width(), rv.rect.height()) == (100, 200)
+    ed.set_tool("select")
+    ed.sel.set([r])
+    # угол без Shift — свободно; Shift, нажатый уже во время растягивания, — пропорции
+    br = _corner(r, "br")
+    _drag(ed.tool, br, br + QPointF(40, 0))
+    assert abs(r.rect.width() - 200) < 1e-6 and abs(r.rect.height() - 80) < 1e-6
+    tl0 = _corner(r, "tl")
+    br = _corner(r, "br")
+    _drag_shift_late(ed.tool, br, br + QPointF(100, 5))
+    assert abs(r.rect.width() / r.rect.height() - 2.5) < 1e-6
+    assert (_corner(r, "tl") - tl0).manhattanLength() < 1e-6
+    # боковой маркер с Shift — ширина корпуса растёт пропорционально
+    rr = _corner(r, "r")
+    w0 = r.rect.width()
+    _drag_shift_late(ed.tool, rr, rr + QPointF(60, 0))
+    assert abs(r.rect.width() - (w0 + 60)) < 1e-6 and abs(r.rect.height() - (w0 + 60) / 2.5) < 1e-6
+    # Shift, зажатый до захвата маркера, — объект двигается целиком, размер прежний
+    size0 = (r.rect.width(), r.rect.height())
+    tl0 = _corner(r, "tl")
+    br = _corner(r, "br")
+    _drag(ed.tool, br, br + QPointF(30, 20), Qt.ShiftModifier)
+    assert (r.rect.width(), r.rect.height()) == size0
+    moved = _corner(r, "tl") - tl0          # точка захвата могла притянуться привязкой — сдвиг примерно (30, 20)
+    assert abs(moved.x() - 30) <= 12 and abs(moved.y() - 20) <= 12
+    # кнопка «1 : 2»: длинная сторона и центр на месте, работает и у повёрнутого
+    r.set_prop("angle", 30.0)
+    c0 = r.mapToScene(r.rect.center())
+    long0 = r.rect.width()
+    ed.resistor_aspect([r])
+    assert abs(r.aspect() - 2.0) < 1e-6 and abs(r.rect.width() - long0) < 1e-6
+    c1 = r.mapToScene(r.rect.center())
+    assert abs(c1.x() - c0.x()) < 1e-6 and abs(c1.y() - c0.y()) < 1e-6
+    ed.undo.undo()
+    assert abs(r.aspect() - 2.5) < 1e-6

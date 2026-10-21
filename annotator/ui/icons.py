@@ -153,6 +153,17 @@ def _draw(name, p: QPainter):
         p.drawRect(QRectF(10, 16, 44, 32))
     elif name == "ellipse":
         p.drawEllipse(QRectF(8, 14, 48, 36))
+    elif name == "resistor":
+        # корпус с площадками на концах (вид сверху)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 80, 70, 170))
+        p.drawRect(QRectF(6, 20, 13, 24))
+        p.drawRect(QRectF(45, 20, 13, 24))
+        p.setPen(_pen(FG, 3.5))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(QRectF(6, 20, 52, 24))
+        p.drawLine(QPointF(19, 20), QPointF(19, 44))
+        p.drawLine(QPointF(45, 20), QPointF(45, 44))
     elif name == "polyline":
         p.drawPolyline(QPolygonF([QPointF(8, 50), QPointF(22, 18), QPointF(40, 42), QPointF(56, 12)]))
         p.setBrush(FG)

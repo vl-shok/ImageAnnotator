@@ -1036,6 +1036,12 @@ class Editor(QObject):
         self.doc.itemsChanged.emit()
         self.sel.changed.emit()
 
+    def resistor_aspect(self, items):
+        """Резистор: вернуть соотношение сторон 1:2 (длинная сторона и центр сохраняются)."""
+        res = [i for i in items if i.TYPE == "resistor" and not i.locked]
+        if res:
+            self.change_items(res, lambda: [i.set_aspect() for i in res], "Соотношение сторон 1:2")
+
     # ================================================================ vertices
     def delete_vertex(self, item, idx):
         if not hasattr(item, "points") or item.TYPE not in ("polyline", "polygon"):
