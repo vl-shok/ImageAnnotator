@@ -264,17 +264,21 @@ class PropertiesPanel(QScrollArea):
                     continue
                 ed = make_editor(spec)
                 ed.set_value(defaults.get(spec.name))
-                ed.valueChanged.connect((lambda t, n: (lambda v: styles.remember(t, n, v)))(cls.TYPE, spec.name))
+                ed.valueChanged.connect((lambda t, n: (lambda v: self._remember(t, n, v)))(cls.TYPE, spec.name))
                 row = ed
                 if spec.pair is not None:
                     ped = make_editor(spec.pair)
                     ped.set_value(defaults.get(spec.pair.name, 0))
                     ped.valueChanged.connect(
-                        (lambda t, n: (lambda v: styles.remember(t, n, v)))(cls.TYPE, spec.pair.name))
+                        (lambda t, n: (lambda v: self._remember(t, n, v)))(cls.TYPE, spec.pair.name))
                     row = pair_row(ed, ped)
                 sec.add_row(spec.label, row)
         else:
             self._build_doc_info()
+
+    def _remember(self, type_name, name, value):
+        styles.remember(type_name, name, value)
+        self.ed.styleChanged.emit()
 
     def _build_doc_info(self):
         self._title("Документ")

@@ -1122,3 +1122,25 @@ def test_canvas_flip_keeps_glue(ed):
     ed.sel.set([r])
     ed.nudge(0, 10)
     assert ln.mapToScene(ln.points[0]) == QPointF(600, 170)
+
+
+def test_pencil_brush_circle_follows_width(ed):
+    from PySide6.QtCore import Qt
+    from annotator import styles
+    from annotator.tools.base import ToolEvent
+    view = _tools_view(ed)
+    ed.set_tool("freehand")
+    t = ed.tool
+    t.move(ToolEvent(QPointF(300, 300), None, Qt.NoModifier, Qt.NoButton, Qt.NoButton))
+    assert t.hover == QPointF(300, 300) and not t.outside
+    w0 = t.brush_width()
+    # толщину меняют в панели «Новый объект: Карандаш»
+    t.leave()
+    assert t.outside
+    w1 = w0 * 3
+    styles.remember("freehand", "width", w1)
+    ed.styleChanged.emit()
+    assert not t.outside and abs(t.brush_width() - w1) < 0.51
+    # во время рисования — толщина рисуемой линии
+    t.press(ToolEvent(QPointF(300, 300), None, Qt.NoModifier, Qt.LeftButton, Qt.LeftButton))
+    assert t.brush_width() == float(t.temp.props["width"])

@@ -370,6 +370,8 @@ class CanvasView(QGraphicsView):
         self.hover_handle = None
         if self.ed.tool is not None and not self.ed.tool.busy():
             self.snap_hit = None
+        if self.ed.tool is not None:
+            self.ed.tool.leave()
         self.viewport().update()
         super().leaveEvent(ev)
 

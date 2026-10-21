@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QPen
 
 from ..geometry import constrain_angle, dist
 from ..items import (ArrowItem, BreakItem, CalloutItem, DimensionItem, MagnifierItem, EllipseItem, FreehandItem, LineItem, NumberItem,
@@ -238,12 +239,48 @@ class FreehandTool(Tool, _TempMixin):
     def __init__(self, editor):
         super().__init__(editor)
         self.temp = None
+        self.hover = None          # последняя позиция курсора (сцена) — там рисуется круг толщины
+        self.outside = True        # курсор не над холстом — круг не показываем
+        editor.styleChanged.connect(self._style_changed)
 
     def busy(self):
         return self.temp is not None
 
     def hint(self):
         return "Рисуйте с зажатой левой кнопкой. Отпустите возле начала — контур замкнётся (магнит)"
+
+    # ---------------------------------------------------- круг толщины на курсоре
+    def brush_width(self) -> float:
+        if self.temp is not None:
+            return float(self.temp.props.get("width", 1))
+        from .. import styles
+        return float(styles.defaults_for(FreehandItem).get("width", 1))
+
+    def _style_changed(self):
+        # толщину меняют в панели свойств — показать новый круг там, где курсор ушёл с холста
+        if self.ed.tool is self and self.hover is not None and self.view:
+            self.outside = False
+            self.view.viewport().update()
+
+    def leave(self):
+        self.outside = True
+
+    def deactivate(self):
+        self.hover = None
+        super().deactivate()
+
+    def draw_overlay(self, painter, view):
+        if self.hover is None or self.outside:
+            return
+        r = self.brush_width() / 2
+        if r * view.scale_factor() < 2:
+            return   # тоньше пары пикселей экрана — хватает перекрестия
+        painter.setBrush(Qt.NoBrush)
+        for color, dash in ((QColor(255, 255, 255, 220), False), (QColor(0, 0, 0, 200), True)):
+            pen = QPen(color, 1, Qt.DashLine if dash else Qt.SolidLine)   # белый + чёрный пунктир — виден на любом фоне
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.drawEllipse(self.hover, r, r)
 
     def _near_start(self, pos):
         it = self.temp
@@ -264,6 +301,8 @@ class FreehandTool(Tool, _TempMixin):
         self.temp.set_scene_points([e.pos])
 
     def move(self, e):
+        self.hover, self.outside = QPointF(e.pos), False
+        self.view.viewport().update()
         if self.temp is not None and e.left_down:
             self.temp.add_point(e.pos, 1.5 / self.view.scale_factor())
             st = self._near_start(e.pos)

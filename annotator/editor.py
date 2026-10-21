@@ -30,6 +30,7 @@ class Editor(QObject):
     snapChanged = Signal()
     cropChanged = Signal()
     filterChanged = Signal()
+    styleChanged = Signal()       # изменён стиль для новых объектов (например, толщина карандаша)
 
     def __init__(self):
         super().__init__()
@@ -207,6 +208,7 @@ class Editor(QObject):
         self.change_items(items, fn, "Свойство", merge_key=("prop", name, self.session))
         for t in {i.TYPE for i in items}:
             styles.remember(t, name, value)
+        self.styleChanged.emit()
 
     def set_common(self, name, value):
         """Общие атрибуты: layer / locked / visible."""
