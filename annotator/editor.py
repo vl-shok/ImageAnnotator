@@ -9,11 +9,12 @@ import os
 import uuid
 
 from PySide6.QtCore import QMimeData, QObject, QPointF, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QUndoStack
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QTransform, QUndoStack
 
 from . import imageops, styles
 from .commands import AddCmd, AdjustCmd, ItemImageCmd, LayersCmd, RasterCmd, RemoveCmd, StateCmd
 from .document import BG_LAYER_ID, Document, Layer
+from .geometry import dist
 from .items import ImageItem, create_from_dict
 from .selection import SelectionManager
 from .snap import SnapManager
@@ -842,6 +843,126 @@ class Editor(QObject):
         self.undo.endMacro()
         if self.view:
             self.view.fit()
+
+    # ================================================================ поворот / отражение холста
+    TRANSFORMS = {
+        "cw": "Повернуть холст на 90° по часовой",
+        "ccw": "Повернуть холст на 90° против часовой",
+        "180": "Повернуть холст на 180°",
+        "fliph": "Отразить холст по горизонтали",
+        "flipv": "Отразить холст по вертикали",
+    }
+    UPRIGHT_TYPES = ("text", "callout", "number")   # при повороте холста надписи остаются горизонтальными
+
+    def transform_canvas(self, op: str):
+        """Повернуть / отразить фото вместе со всеми объектами (op — ключ TRANSFORMS)."""
+        bg = self.doc.background
+        if bg is None or op not in self.TRANSFORMS:
+            return
+        w, h = bg.width(), bg.height()
+        if op == "cw":
+            deg, img = 90.0, bg.transformed(QTransform().rotate(90))
+            F = lambda p: QPointF(h - p.y(), p.x())  # noqa: E731
+        elif op == "ccw":
+            deg, img = -90.0, bg.transformed(QTransform().rotate(-90))
+            F = lambda p: QPointF(p.y(), w - p.x())  # noqa: E731
+        elif op == "180":
+            deg, img = 180.0, bg.transformed(QTransform().rotate(180))
+            F = lambda p: QPointF(w - p.x(), h - p.y())  # noqa: E731
+        elif op == "fliph":
+            deg, img = 0.0, bg.flipped(Qt.Horizontal)
+            F = lambda p: QPointF(w - p.x(), p.y())  # noqa: E731
+        else:
+            deg, img = 0.0, bg.flipped(Qt.Vertical)
+            F = lambda p: QPointF(p.x(), h - p.y())  # noqa: E731
+        text = self.TRANSFORMS[op]
+        items = self.doc.items()
+        self.set_raster_selection(None)
+        self.undo.beginMacro(text)
+        self._raster_change(img, text)
+        if items:
+            def fn():
+                for it in items:
+                    self._transform_item(it, F, deg, op)
+                self._refresh_glue(items)
+            self.change_items(items, fn, text)
+        self.undo.endMacro()
+        if self.view:
+            self.view.fit()
+
+    @staticmethod
+    def _transform_item(it, F, deg, op):
+        mirror = op in ("fliph", "flipv")
+        if it.TYPE == "magnifier":
+            # область и увеличенный вид — прямоугольники, при повороте на 90° они остаются прямоугольниками
+            def mapped(r):
+                return QRectF(F(it.mapToScene(r.topLeft())), F(it.mapToScene(r.bottomRight()))).normalized()
+            src, dst = mapped(it.src), mapped(it.dst_rect())
+            it.prepareGeometryChange()
+            it.setPos(src.topLeft())
+            it.src = QRectF(0, 0, src.width(), src.height())
+            it.dst = dst.topLeft() - src.topLeft()
+            it.update()
+            return
+        piv = it.rotation_pivot()
+        c = it.mapToScene(piv)
+        if it.uses_angle():
+            a = float(it.props.get("angle", 0) or 0)
+            if mirror:
+                a = -a
+            elif it.TYPE not in Editor.UPRIGHT_TYPES:
+                a += deg
+            a = (a + 180.0) % 360.0 - 180.0
+            if a == -180.0:
+                a = 180.0
+            if a != float(it.props.get("angle", 0) or 0):
+                it.set_prop("angle", round(a, 3))
+            it.setPos(it.pos() + (F(c) - it.mapToScene(piv)))
+            return
+        # объекты из точек: каждая точка — туда, где она теперь на фото; у надписей (блок не поворачивается)
+        # в новое место переносится центр, у остальных — начало координат объекта
+        old = QPointF(it.pos())
+        new = old + (F(c) - c) if it.TYPE in Editor.UPRIGHT_TYPES else F(old)
+        it.setPos(new)
+        it.rotate_geometry(lambda lp: F(lp + old) - new)
+        if it.TYPE == "dimension" and mirror:
+            it.offset = -it.offset            # размерная линия — с той же стороны, что и была на фото
+        if it.TYPE == "callout":
+            for ld in it.leaders:            # начало стрелки на рамке
+                st = ld[1]
+                if st is None:
+                    continue
+                if op == "fliph":
+                    ld[1] = (round(1.0 - st[0], 4), st[1])
+                elif op == "flipv":
+                    ld[1] = (st[0], round(1.0 - st[1], 4))
+                else:
+                    ld[1] = None                 # блок не поворачивается — сторона выбирается заново
+            if mirror:
+                it.bends = [(b[0], -b[1]) if b is not None else None for b in it.bends]
+        it.update()
+
+    def _refresh_glue(self, items):
+        """После поворота/отражения: пересчитать, к какой точке объекта-цели приклеен каждый конец
+        (у надписей, которые остались горизонтальными, точки сместились)."""
+        for it in items:
+            if not it.glue:
+                continue
+            ends = it.glue_ends()
+            for key, spec in list(it.glue.items()):
+                target = self.doc.find(spec.get("uid"))
+                if target is None or key not in ends:
+                    continue
+                end = it.mapToScene(ends[key])
+                new = None
+                for i, (lp, kind) in enumerate(target.snap_points()):
+                    if kind != "edge" and dist(target.mapToScene(lp), end) < 1e-3:
+                        new = {"uid": target.uid, "i": i, "k": kind, "p": [round(lp.x(), 3), round(lp.y(), 3)]}
+                        break
+                if new is None:
+                    lp = target.mapFromScene(end)
+                    new = {"uid": target.uid, "i": None, "k": "edge", "p": [round(lp.x(), 3), round(lp.y(), 3)]}
+                it.glue[key] = new
 
     # ================================================================ color correction
     def set_background_color(self, before: dict, after: dict):

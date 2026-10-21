@@ -52,6 +52,7 @@ HOTKEYS = [
     ("Карандаш: отпустить у начала", "Замкнуть контур"),
     ("Размер: маркер надписи", "Вдоль — положение текста, поперёк — отступ"),
     ("Двойной клик / ПКМ по вершине", "Удалить вершину (или Alt+клик)"), ("Ctrl+M", "Коррекция цвета"),
+    ("Ctrl+R / Ctrl+Shift+R", "Повернуть холст на 90° по / против часовой"),
     ("Ctrl+Alt+G", "Менеджер групп"), ("Shift+S", "Привязка вкл/выкл"),
     ("Ctrl+D", "Дублировать"), ("Ctrl+G / Ctrl+Shift+G", "Группировать / разгруппировать"),
     ("Выноска: Ctrl+тянуть от рамки", "Новая стрелка; ромб — начало, круг — сдвинуть блок, двойной клик по острию — удалить"),
@@ -165,6 +166,9 @@ class MainWindow(QMainWindow):
           tip="Коррекция цвета фото (или выбранного изображения)")
         A("color_reset", "Сбросить коррекцию цвета фото", ed.reset_background_color)
         A("image_uncrop", "Вернуть обрезанное изображение", self.image_uncrop)
+        for k, sc in (("cw", "Ctrl+R"), ("ccw", "Ctrl+Shift+R"), ("180", None), ("fliph", None), ("flipv", None)):
+            A(f"canvas_{k}", ed.TRANSFORMS[k], (lambda op: (lambda: ed.transform_canvas(op)))(k), sc,
+              tip=ed.TRANSFORMS[k] + " (вместе со всеми пометками)")
         A("groups", "Менеджер групп…", self.group_manager, "Ctrl+Alt+G", "group")
         A("hotkeys", "Горячие клавиши", self.show_hotkeys, "F1")
         A("escape", "Отмена операции", self.view.escape, "Esc")
@@ -227,6 +231,10 @@ class MainWindow(QMainWindow):
         m.addAction(a["tool_crop"])
         m.addAction(a["color"])
         m.addAction(a["color_reset"])
+        m.addSeparator()
+        rot = m.addMenu("Повернуть / отразить холст")
+        for k in ("cw", "ccw", "180", None, "fliph", "flipv"):
+            rot.addSeparator() if k is None else rot.addAction(a[f"canvas_{k}"])
         m.addSeparator()
         for k in ("raster_obj", "raster_fill", "raster_opacity", "raster_blur", "raster_crop", None, "image_uncrop"):
             m.addSeparator() if k is None else m.addAction(a[k])
@@ -314,6 +322,7 @@ class MainWindow(QMainWindow):
         ed.sel.changed.connect(self._update_actions)
         ed.rasterSelectionChanged.connect(self._update_actions)
         ed.doc.backgroundChanged.connect(self._update_size)
+        ed.doc.backgroundChanged.connect(self._update_actions)
         ed.snapChanged.connect(lambda: self.acts["snap"].setChecked(ed.snap.enabled))
         self.view.cursorMoved.connect(lambda p: self.pos_lbl.setText(f"X {p.x():.0f}  Y {p.y():.0f}"))
         self.view.zoomChanged.connect(lambda z: self.zoom_lbl.setText(f"{z * 100:.0f}%"))
@@ -344,6 +353,9 @@ class MainWindow(QMainWindow):
             self.acts[f"align_{k}"].setEnabled(many)
         for k in ("raster_obj", "raster_fill", "raster_opacity", "raster_crop"):
             self.acts[k].setEnabled(raster)
+        has_bg = self.ed.doc.background is not None
+        for k in ("cw", "ccw", "180", "fliph", "flipv"):
+            self.acts[f"canvas_{k}"].setEnabled(has_bg)
         if self.ed.tool is not None and self.ed.tool.name == "number":
             self.hint_lbl.setText(f"{self.ed.tool.title}:  {self.ed.tool.hint()}")
 
@@ -676,6 +688,9 @@ class MainWindow(QMainWindow):
         else:
             if ed.doc.background is not None:
                 m.addAction("Коррекция цвета фото…", lambda: self.color_correction(None))
+                rot = m.addMenu("Повернуть / отразить холст")
+                for k in ("cw", "ccw", "180", None, "fliph", "flipv"):
+                    rot.addSeparator() if k is None else rot.addAction(self.acts[f"canvas_{k}"])
                 m.addSeparator()
             for k in ("paste", "select_all", None, "insert_image", None, "fit", "actual", None, "copy_result",
                       "export"):

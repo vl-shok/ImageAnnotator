@@ -1027,3 +1027,98 @@ def test_guides_when_drawing_and_moving(ed):
     pl = [i for i in ed.doc.items() if i.TYPE == "polyline"][0]
     p0, p1 = pl.scene_points()
     assert abs((p1.x() - p0.x()) + (p1.y() - p0.y())) < 1e-6
+
+
+def _canvas_scene(ed):
+    from annotator.items import DimensionItem, MagnifierItem
+    ed.doc.background.setPixelColor(10, 20, QColor(255, 0, 0))
+    ln = line((10, 20), (100, 20))
+    ar = ArrowItem()
+    ar.set_drag(QPointF(300, 300), QPointF(400, 350))
+    rc = RectItem()
+    rc.set_drag(QPointF(500, 100), QPointF(600, 160))
+    tx = TextItem({"text": "Надпись"})
+    tx.setPos(200, 400)
+    co = CalloutItem({"text": "К"})
+    co.setPos(600, 400)
+    co.tip = QPointF(-100, 100)
+    nm = NumberItem({"leader": True})
+    nm.setPos(50, 500)
+    nm.tip = QPointF(40, -60)
+    dm = DimensionItem()
+    dm.set_drag(QPointF(100, 200), QPointF(250, 200))
+    mg = MagnifierItem()
+    mg.set_drag(QPointF(400, 450), QPointF(440, 480))
+    items = [ln, ar, rc, tx, co, nm, dm, mg]
+    ed.add_items(items)
+    return items
+
+
+def _snapshot(items):
+    return [round_state(i.state()) for i in items]
+
+
+def round_state(d):
+    import json
+    s = json.dumps(d, sort_keys=True)
+    import re
+    return re.sub(r"-?\d+\.\d+", lambda m: f"{float(m.group()):.2f}".replace("-0.00", "0.00"), s)
+
+
+def test_canvas_rotate_cw_maps_objects(ed):
+    ln, ar, rc, tx, co, nm, dm, mg = _canvas_scene(ed)
+    tx_c = tx.content_rect().center()
+    co_tip = co.mapToScene(co.tip)
+    ed.transform_canvas("cw")
+    bg = ed.doc.background
+    assert (bg.width(), bg.height()) == (600, 800)
+    # пиксель (10, 20) → (600 - 20, 10) = (580, 10) (с учётом размера пикселя — 579)
+    assert bg.pixelColor(579, 10) == QColor(255, 0, 0)
+    a, b = ln.scene_points()
+    assert (round(a.x()), round(a.y()), round(b.x()), round(b.y())) == (580, 10, 580, 100)
+    # прямоугольник повёрнут вместе с фото, надпись — горизонтальна, но на новом месте
+    assert rc.props["angle"] == 90
+    assert tx.props["angle"] == 0
+    c = tx.content_rect().center()
+    assert abs(c.x() - (600 - tx_c.y())) < 1e-6 and abs(c.y() - tx_c.x()) < 1e-6
+    t = co.mapToScene(co.tip)
+    assert abs(t.x() - (600 - co_tip.y())) < 1e-6 and abs(t.y() - co_tip.x()) < 1e-6
+    # лупа: область 30×40 (была 40×30)
+    assert (round(mg.src.width()), round(mg.src.height())) == (30, 40)
+    # одна отмена — всё как было
+    ed.undo.undo()
+    assert ed.doc.background.width() == 800
+    a, b = ln.scene_points()
+    assert (round(a.x()), round(a.y())) == (10, 20)
+    assert rc.props["angle"] == 0
+
+
+def test_canvas_four_turns_and_double_flip_are_identity(ed):
+    items = _canvas_scene(ed)
+    before = _snapshot(items)
+    img = QImage(ed.doc.background)
+    for _ in range(4):
+        ed.transform_canvas("cw")
+    assert _snapshot(items) == before
+    assert ed.doc.background == img
+    for op in ("fliph", "fliph", "flipv", "flipv", "ccw", "cw", "180", "180"):
+        ed.transform_canvas(op)
+    assert _snapshot(items) == before
+    assert ed.doc.background == img
+
+
+def test_canvas_flip_keeps_glue(ed):
+    _tools_view(ed)
+    r = RectItem()
+    r.set_drag(QPointF(100, 100), QPointF(200, 160))
+    ed.add_items([r])
+    ed.set_tool("line")
+    _drag(ed.tool, QPointF(200, 160), QPointF(400, 300))
+    ln = [i for i in ed.doc.items() if i.TYPE == "line"][0]
+    assert "s" in ln.glue
+    ed.transform_canvas("fliph")
+    assert ln.mapToScene(ln.points[0]) == QPointF(600, 160)
+    # после отражения конец всё ещё приклеен к тому же углу прямоугольника
+    ed.sel.set([r])
+    ed.nudge(0, 10)
+    assert ln.mapToScene(ln.points[0]) == QPointF(600, 170)
