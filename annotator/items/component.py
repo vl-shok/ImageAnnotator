@@ -148,35 +148,58 @@ class ResistorItem(BoxItem):
         if p.get("show_text") and (p.get("text") or "").strip():
             self._paint_label(painter)
 
-    def _paint_label(self, painter):
+    LABEL_FILL = 0.7      # авторазмер: высота букв — до 70% ширины корпуса
+    LABEL_MARGIN = 0.06   # поля от площадок и краёв (доля короткой стороны корпуса)
+
+    def label_font(self):
+        """Шрифт надписи: ручной размер — как в свойствах; «Размер по корпусу» — буквы по габариту
+        (точные габариты глифов, а не высота строки) между площадками с небольшими полями."""
         p = self.props
-        inner = self.body_inner()
-        horiz = self.horizontal()
-        # вдоль корпуса: у вертикального — повёрнут на -90°
-        avail_w, avail_h = (inner.width(), inner.height()) if horiz else (inner.height(), inner.width())
-        pad = max(1.0, min(avail_w, avail_h) * 0.08)
-        avail_w, avail_h = avail_w - 2 * pad, avail_h - 2 * pad
-        if avail_w <= 2 or avail_h <= 2:
-            return
         font = make_font(p)
         text = p.get("text", "")
-        if p.get("auto_size", True):
-            # крупно, но с полями: строки делят высоту корпуса, по ширине ужимается ниже
-            lines = max(1, text.count("\n") + 1)
-            font.setPixelSize(max(4, int(avail_h * 0.8 / lines)))
+        if not p.get("auto_size", True):
+            return font
+        inner = self.body_inner()
+        along, across = (inner.width(), inner.height()) if self.horizontal() else (inner.height(), inner.width())
+        m = min(along, across) * self.LABEL_MARGIN
+        avail_w, avail_h = along - 2 * m, across * self.LABEL_FILL
+        if avail_w <= 1 or avail_h <= 1:
+            return None
+        font.setPixelSize(100)
+        w, h = self._text_size(font, text)
+        k = min(avail_w / max(w, 1e-6), avail_h / max(h, 1e-6))
+        font.setPixelSize(max(1, int(100 * k)))
+        return font
+
+    @staticmethod
+    def _text_size(font, text):
         fm = QFontMetricsF(font)
-        tr = fm.boundingRect(QRectF(0, 0, 1e6, 1e6), int(Qt.AlignCenter), text)
-        # не помещается — уменьшаем шрифт, чтобы текст оставался внутри корпуса
-        k = min(1.0, avail_w / max(tr.width(), 1e-6), avail_h / max(tr.height(), 1e-6))
-        if k < 1.0:
-            font.setPixelSize(max(1, int(font.pixelSize() * k)))
+        if "\n" in text:
+            r = fm.boundingRect(QRectF(0, 0, 1e6, 1e6), int(Qt.AlignCenter), text)
+        else:
+            r = fm.tightBoundingRect(text)
+        return r.width(), r.height()
+
+    def _paint_label(self, painter):
+        p = self.props
+        font = self.label_font()
+        if font is None:
+            return
+        text = p.get("text", "")
         painter.save()
-        painter.translate(inner.center())
-        if not horiz:
-            painter.rotate(-90)
+        painter.translate(self.body_inner().center())
+        if not self.horizontal():
+            painter.rotate(-90)      # вдоль корпуса
         painter.setFont(font)
         painter.setPen(QColor(p.get("text_color", "#ff2020")))
-        painter.drawText(QRectF(-avail_w / 2, -avail_h / 2, avail_w, avail_h), int(Qt.AlignCenter), text)
+        fm = QFontMetricsF(font)
+        if "\n" in text:
+            big = 1e5
+            painter.drawText(QRectF(-big / 2, -big / 2, big, big), int(Qt.AlignCenter), text)
+        else:
+            # центр по самим буквам (без пустого места строки над и под ними)
+            t = fm.tightBoundingRect(text)
+            painter.drawText(QPointF(-t.center().x(), -t.center().y()), text)
         painter.restore()
 
     def describe(self):

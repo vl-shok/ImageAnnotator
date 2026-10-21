@@ -1264,3 +1264,21 @@ def test_resistor_aspect(ed):
     assert abs(c1.x() - c0.x()) < 1e-6 and abs(c1.y() - c0.y()) < 1e-6
     ed.undo.undo()
     assert abs(r.aspect() - 2.5) < 1e-6
+
+
+def test_resistor_label_size(ed):
+    from PySide6.QtGui import QFontMetricsF
+    from annotator.items import ResistorItem
+    r = ResistorItem(QRectF(0, 0, 200, 60), {"show_text": True, "text": "R1"})
+    ed.add_items([r])
+    # «Размер по корпусу»: буквы занимают ~70% ширины корпуса и не вылезают за поля
+    f = r.label_font()
+    t = QFontMetricsF(f).tightBoundingRect("R1")
+    inner = r.body_inner()
+    assert t.height() <= inner.height() * r.LABEL_FILL + 1 and t.height() >= inner.height() * r.LABEL_FILL - 2
+    assert t.width() <= inner.width()
+    # ручной размер — ровно как в свойствах, в том числе крупнее корпуса
+    r.set_prop("auto_size", False)
+    for size in (12, 30, 90):
+        r.set_prop("size", size)
+        assert r.label_font().pixelSize() == size
