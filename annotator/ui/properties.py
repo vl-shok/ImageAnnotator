@@ -138,6 +138,8 @@ class PropertiesPanel(QScrollArea):
             ed.valueChanged.connect((lambda name: (lambda v: self.ed.set_prop(name, v)))(spec.name))
             if hasattr(ed, "committed"):
                 ed.committed.connect(self.ed.bump_session)
+            if hasattr(ed, "finished"):
+                ed.finished.connect(self.ed.release_focus, Qt.QueuedConnection)
             self._editors.append((ed, getter))
             row = ed
             if spec.pair is not None and all(spec.pair.name in i.props for i in items):

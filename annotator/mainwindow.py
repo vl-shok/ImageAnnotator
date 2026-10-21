@@ -53,6 +53,7 @@ HOTKEYS = [
     ("Размер: маркер надписи", "Вдоль — положение текста, поперёк — отступ"),
     ("Двойной клик / ПКМ по вершине", "Удалить вершину (или Alt+клик)"), ("Ctrl+M", "Коррекция цвета"),
     ("Ctrl+R / Ctrl+Shift+R", "Повернуть холст на 90° по / против часовой"),
+    ("Ctrl+Enter (в тексте)", "Готово и снять выделение — фокус на холст"),
     ("Ctrl+Alt+G", "Менеджер групп"), ("Shift+S", "Привязка вкл/выкл"),
     ("Ctrl+D", "Дублировать"), ("Ctrl+G / Ctrl+Shift+G", "Группировать / разгруппировать"),
     ("Выноска: Ctrl+тянуть от рамки", "Новая стрелка; ромб — начало, круг — сдвинуть блок, двойной клик по острию — удалить"),
@@ -68,7 +69,8 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(app_icon())
         self.settings = QSettings(APP_NAME, APP_NAME)
         self.ed = Editor()
-        self.ed.ask_text = lambda initial="", title="Текст": ask_text(self, initial, title)
+        self.ed.ask_text = lambda initial="", title="Текст": ask_text(self, initial, title,
+                                                                     on_release=self.ed.release_focus)
         self.view = CanvasView(self.ed)
         self.setCentralWidget(self.view)
         for t in make_tools(self.ed):

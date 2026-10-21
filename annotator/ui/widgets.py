@@ -340,6 +340,7 @@ class BoolEditor(QCheckBox):
 class TextEditor(QPlainTextEdit):
     valueChanged = Signal(object)
     committed = Signal()
+    finished = Signal()      # Ctrl+Enter — закончить правку (снять выделение)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -359,6 +360,13 @@ class TextEditor(QPlainTextEdit):
     def _changed(self):
         if not self._block:
             self.valueChanged.emit(self.toPlainText())
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter) and e.modifiers() & Qt.ControlModifier:
+            self.committed.emit()
+            self.finished.emit()
+            return
+        super().keyPressEvent(e)
 
     def focusOutEvent(self, e):
         self.committed.emit()

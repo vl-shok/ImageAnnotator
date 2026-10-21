@@ -1378,3 +1378,37 @@ def test_polyline_drag_end_snaps_to_own_start(ed):
     mid_v = pl.scene_points()[1]
     _drag(ed.tool, mid_v, pl.scene_points()[2] + QPointF(3, 3))
     assert pl.scene_points()[1] == pl.scene_points()[2]
+
+
+def test_ctrl_enter_finishes_text_editing(ed):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from annotator.ui.dialogs import TextDialog
+    from annotator.ui.widgets import TextEditor
+
+    def key(w, mods):
+        QApplication.sendEvent(w, QKeyEvent(QEvent.KeyPress, Qt.Key_Return, mods))
+
+    # окно ввода: Enter — готово, Ctrl+Enter — готово и снять выделение, Shift+Enter — новая строка
+    d = TextDialog(None, "R1")
+    key(d.edit, Qt.ShiftModifier)
+    assert d.result() == 0 and "\n" in d.text()
+    key(d.edit, Qt.ControlModifier)
+    assert d.result() == TextDialog.Accepted and d.release
+    d2 = TextDialog(None, "R1")
+    key(d2.edit, Qt.NoModifier)
+    assert d2.result() == TextDialog.Accepted and not d2.release
+    # поле «Текст» в свойствах: Ctrl+Enter — сигнал «закончить», без новой строки
+    te = TextEditor()
+    te.set_value("abc")
+    got = []
+    te.finished.connect(lambda: got.append(1))
+    key(te, Qt.ControlModifier)
+    assert got == [1] and te.toPlainText() == "abc"
+    # закончить правку: выделение снято
+    _tools_view(ed)
+    t = TextItem({"text": "Т"})
+    ed.add_items([t])
+    assert ed.sel.items == [t]
+    ed.release_focus()
+    assert ed.sel.items == []

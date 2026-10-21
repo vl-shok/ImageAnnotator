@@ -226,6 +226,12 @@ class Editor(QObject):
         self.change_items(items, fn, "Свойство")
         self.doc.itemsChanged.emit()
 
+    def release_focus(self):
+        """Закончить правку: снять выделение, фокус — на холст (Ctrl+Enter в тексте)."""
+        self.sel.clear()
+        if self.view is not None:
+            self.view.setFocus()
+
     # ================================================================ object ops
     def edit_item(self, item):
         """Двойной клик: правка текста / номера."""

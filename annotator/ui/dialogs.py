@@ -1,7 +1,7 @@
 """Небольшие диалоги."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QCursor
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit,
                                QPushButton, QSpinBox, QVBoxLayout)
@@ -16,6 +16,8 @@ class _TextEdit(QPlainTextEdit):
 
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Return, Qt.Key_Enter) and not (e.modifiers() & Qt.ShiftModifier):
+            # Ctrl+Enter — готово и снять выделение (фокус — на холст)
+            self.dlg.release = bool(e.modifiers() & Qt.ControlModifier)
             self.dlg.accept()
             return
         super().keyPressEvent(e)
@@ -26,6 +28,7 @@ class TextDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+        self.release = False
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
         self.edit = _TextEdit(self)
@@ -33,7 +36,8 @@ class TextDialog(QDialog):
         self.edit.selectAll()
         self.edit.setMinimumSize(320, 90)
         lay.addWidget(self.edit)
-        hint = QLabel("Enter — готово,  Shift+Enter — новая строка,  Esc — отмена")
+        hint = QLabel("Enter — готово,  Ctrl+Enter — готово и снять выделение,\n"
+                      "Shift+Enter — новая строка,  Esc — отмена")
         hint.setObjectName("PanelSub")
         lay.addWidget(hint)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -48,9 +52,13 @@ class TextDialog(QDialog):
         return self.edit.toPlainText()
 
 
-def ask_text(parent, initial="", title="Текст"):
+def ask_text(parent, initial="", title="Текст", on_release=None):
+    """Текст или None (отмена). on_release() вызывается после закрытия по Ctrl+Enter."""
     d = TextDialog(parent, initial, title)
     if d.exec() == QDialog.Accepted:
+        if d.release and on_release is not None:
+            # после того как вызывающий код применит текст (создаст/выделит объект)
+            QTimer.singleShot(0, on_release)
         return d.text()
     return None
 
