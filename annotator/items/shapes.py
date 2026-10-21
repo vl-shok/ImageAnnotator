@@ -103,6 +103,14 @@ class PathItem(AnnotationItem):
                 return self.insert_vertex(a + 1, mid(self.points[a], self.points[b]))
         return None
 
+    def handle_anchor(self, idx):
+        n = len(self.points)
+        if not (0 <= idx < n) or n < 2:
+            return None
+        if idx > 0:
+            return QPointF(self.points[idx - 1])
+        return QPointF(self.points[-1] if self.CLOSED else self.points[1])
+
     def insert_vertex(self, index, p: QPointF) -> int:
         self.prepareGeometryChange()
         self.points.insert(index, QPointF(p))

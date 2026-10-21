@@ -14,6 +14,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 
 from ..geometry import constrain_axis
+from ..snap import MOVE_POINTS_MAX
 from .base import Tool, ToolEvent
 
 DRAG_THRESHOLD = 3  # px экрана
@@ -43,6 +44,8 @@ class SelectTool(Tool):
         self.h_idx = -1
         self.click_item = None
         self.h_text = None
+        self.h_refs = None       # свои точки объекта (вершины) для направляющих при перетаскивании ручки
+        self.move_pts = []       # характерные точки перемещаемых объектов (сцена, до сдвига)
         self.followers = []      # объекты с концами, приклеенными к изменяемым (едут следом)
         self.f_before = []
 
@@ -113,6 +116,7 @@ class SelectTool(Tool):
                 new_idx = item.begin_handle_drag(idx)
                 self.h_item, self.h_idx = item, (idx if new_idx is None else new_idx)
                 self._start_followers([item])
+                self.h_refs = self._own_refs(item, self.h_idx)
                 self.state = "handle"
             return
         it = v.hit_item(e.pos)
@@ -150,22 +154,32 @@ class SelectTool(Tool):
             self.before = [i.state() for i in self.items]
             self.orig_pos = {i: QPointF(i.pos()) for i in self.items}
             self._start_followers(self.items)
+            self.move_pts = self._move_points(self.items)
             v.viewport().setCursor(Qt.ClosedHandCursor if not self.from_handle else Qt.SizeAllCursor)
         if self.state == "move":
             target = self.grab + (e.pos - self.press_pos)
+            guides = []
             if e.shift and not self.from_handle:
                 target = constrain_axis(self.grab, target)
                 v.snap_hit = None
+                delta = target - self.grab
             else:
-                target = v.snap(target, exclude=self.items + self.followers)
-            delta = target - self.grab
+                target = v.snap(target, exclude=self.items + self.followers, guides=False)
+                delta = target - self.grab
+                if v.snap_hit is None and not self.from_handle and not v.snap_disabled():
+                    # точка захвата никуда не привязалась — выравниваем объекты по направляющим
+                    delta, guides = self.ed.snap.find_move_guides(self.doc, self.move_pts, delta, v.guide_tol(),
+                                                                  exclude=self.items + self.followers)
+                    v.show_guides(guides)
             for i in self.items:
                 i.setPos(self.orig_pos[i] + delta)
             self.ed.apply_glue(self.followers)
             self.doc.itemsModified.emit()
         elif self.state == "handle":
             item = self.h_item
-            p = v.snap(e.pos, exclude=[item] + self.followers, extra=item.handle_snap_extra(self.h_idx))
+            anchor = item.handle_anchor(self.h_idx)
+            p = v.snap(e.pos, exclude=[item] + self.followers, extra=item.handle_snap_extra(self.h_idx),
+                       anchor=item.mapToScene(anchor) if anchor is not None else None, refs=self.h_refs)
             item.move_handle(self.h_idx, item.mapFromScene(p), constrain=e.shift, symmetric=e.alt)
             self.ed.apply_glue(self.followers)
             self.doc.itemsModified.emit()
@@ -232,6 +246,31 @@ class SelectTool(Tool):
         it = self.view.hit_item(e.pos)
         if it is not None:
             self.ed.edit_item(it)
+
+    @staticmethod
+    def _move_points(items):
+        """Точки, которые выравниваются при перемещении: характерные точки объектов
+        (у многих объектов — углы, середины сторон и центр общей рамки)."""
+        from ..geometry import rect_snap_points
+        pts = [it.mapToScene(p) for it in items for p, k in it.snap_points() if k != "edge"]
+        if len(pts) > MOVE_POINTS_MAX or not pts:
+            r = QRectF()
+            for it in items:
+                r = r.united(it.content_rect())
+            pts = [p for p, _ in rect_snap_points(r)]
+        return pts
+
+    @staticmethod
+    def _own_refs(item, idx):
+        """Свои вершины/концы объекта (сцена) для выравнивания перетаскиваемой ручки — кроме неё самой.
+        Середины не берём: они сдвигаются вместе с ручкой."""
+        hs = item.handles()
+        # только у объектов из вершин: у прямоугольника и т.п. «свои» точки едут вместе с ручкой
+        if not hasattr(item, "points") or not (0 <= idx < len(hs)):
+            return None
+        h = hs[idx]
+        return [item.mapToScene(p) for p, k in item.snap_points()
+                if k in ("endpoint", "vertex") and abs(p.x() - h.x()) + abs(p.y() - h.y()) > 1e-6]
 
     def _start_followers(self, items):
         self.followers = self.ed.glue_followers(items)

@@ -44,10 +44,13 @@ class SnapPanel(QWidget):
         self.master.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.master.toggled.connect(self._master)
         lay.addWidget(self.master)
-        self.kinds = ToggleGrid(SNAP_KINDS + [("image", "Края фото")], columns=3)
+        self.kinds = ToggleGrid(SNAP_KINDS + [("image", "Края фото"), ("guides", "Выравнивание")], columns=3)
         for k, _ in SNAP_KINDS:
             self.kinds.set_checked(k, k in sn.kinds)
         self.kinds.set_checked("image", sn.to_image)
+        self.kinds.set_checked("guides", sn.guides)
+        self.kinds.buttons["guides"].setToolTip("Направляющие: при рисовании и перемещении — на одной горизонтали/"
+                                                "вертикали с точками других объектов, линии под 0/45/90°")
         self.kinds.toggled.connect(self._kind)
         lay.addWidget(self.kinds)
         row = QHBoxLayout()
@@ -101,6 +104,8 @@ class SnapPanel(QWidget):
         sn = self.ed.snap
         if k == "image":
             sn.to_image = on
+        elif k == "guides":
+            sn.guides = on   # направляющие: горизонталь/вертикаль с точками объектов, 45°
         elif on:
             sn.kinds.add(k)
         else:

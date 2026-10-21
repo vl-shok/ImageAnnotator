@@ -331,6 +331,8 @@ class PropertiesPanel(QScrollArea):
     def _set_kind(self, k, on):
         if k == "image":
             self.ed.snap.to_image = on
+        elif k == "guides":
+            self.ed.snap.guides = on
         elif on:
             self.ed.snap.kinds.add(k)
         else:

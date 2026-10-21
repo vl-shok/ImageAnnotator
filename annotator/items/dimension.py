@@ -227,6 +227,9 @@ class DimensionItem(AnnotationItem):
     def handle_glue_key(self, idx):
         return {0: "a", 1: "b"}.get(idx)
 
+    def handle_anchor(self, idx):
+        return {0: QPointF(self.b), 1: QPointF(self.a)}.get(idx)
+
     def creation_glue_keys(self):
         return ("a", "b")
 

@@ -740,6 +740,7 @@ class MainWindow(QMainWindow):
         sn = self.ed.snap
         sn.enabled = s.value("snap_enabled", True, type=bool)
         sn.radius_px = int(s.value("snap_radius", 10))
+        sn.guides = s.value("snap_guides", True, type=bool)
         kinds = s.value("snap_kinds", None, type=list)
         if kinds:
             sn.kinds = set(kinds)
@@ -758,6 +759,7 @@ class MainWindow(QMainWindow):
         s.setValue("recent_colors", widgets.RECENT)
         s.setValue("snap_enabled", self.ed.snap.enabled)
         s.setValue("snap_radius", self.ed.snap.radius_px)
+        s.setValue("snap_guides", self.ed.snap.guides)
         s.setValue("snap_kinds", sorted(self.ed.snap.kinds))
 
     def closeEvent(self, ev):

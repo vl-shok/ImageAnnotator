@@ -297,6 +297,11 @@ class AnnotationItem(QGraphicsItem):
         """Применить f(локальная точка) -> локальная точка к геометрии. False — не поддерживается."""
         return False
 
+    def handle_anchor(self, idx) -> QPointF | None:
+        """Опорная точка (локально) для направляющих 0/45/90° при перетаскивании ручки idx —
+        соседняя вершина, другой конец и т.п. None — нет."""
+        return None
+
     def handle_snap_extra(self, idx):
         """Дополнительные точки привязки (сцена) при перетаскивании ручки idx — например, свои же точки."""
         return None

@@ -71,7 +71,8 @@ class TwoPointTool(Tool, _TempMixin):
         self.click_mode = False
 
     def _update(self, e):
-        p1 = self.view.snap(e.pos, exclude=[self.temp])
+        # направляющие: 0/45/90° от первой точки и выравнивание с точками других объектов
+        p1 = self.view.snap(e.pos, exclude=[self.temp], anchor=self.p0, guides=not e.shift)
         self.g1 = None if e.shift else self.ed.glue_spec()
         self.temp.set_drag(self.p0, p1, constrain=e.shift, center=e.alt)
 
@@ -134,7 +135,8 @@ class PolyTool(Tool, _TempMixin):
 
     def _floating(self, e):
         own = [(q, "vertex") for q in self.pts]  # привязка к уже поставленным вершинам (замкнуть контур)
-        p = self.view.snap(e.pos, exclude=[self.temp], extra=own)
+        p = self.view.snap(e.pos, exclude=[self.temp], extra=own, anchor=self.pts[-1] if self.pts else None,
+                           guides=not e.shift)
         if e.shift and self.pts:
             p = constrain_angle(self.pts[-1], p)
         return p
@@ -387,7 +389,7 @@ class CalloutTool(Tool, _TempMixin):
                 self.view.viewport().update()
             return super().move(e)
         if e.left_down:
-            self._place(self.view.snap(e.pos, exclude=[self.temp]))
+            self._place(self.view.snap(e.pos, exclude=[self.temp], anchor=self.p0))
 
     def release(self, e):
         if getattr(self, "_edit", None) is not None:

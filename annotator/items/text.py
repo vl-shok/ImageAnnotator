@@ -573,6 +573,12 @@ class CalloutItem(AnnotationItem):
         li = self.leader_index(idx)
         return f"t{li[0]}" if li is not None and li[1] == "tip" else None
 
+    def handle_anchor(self, idx):
+        li = self.leader_index(idx)
+        if li is None or li[1] != "tip":
+            return None
+        return self.start_point(li[0]) or self.box().center()
+
     def snap_points(self):
         return [(QPointF(t), "endpoint") for t, _ in self.leaders] + rect_snap_points(self.box())
 
@@ -697,6 +703,9 @@ class NumberItem(AnnotationItem):
 
     def handle_glue_key(self, idx):
         return "t" if idx == 1 and self.has_leader() else None
+
+    def handle_anchor(self, idx):
+        return QPointF(0, 0) if idx == 1 else None
 
     def move_handle(self, idx, p, constrain=False, symmetric=False):
         self.prepareGeometryChange()

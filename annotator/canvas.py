@@ -25,6 +25,7 @@ HOVER = QColor(120, 200, 255, 150)
 HANDLE_PX = 7
 HANDLE_HIT_PX = 7
 SNAP_COLOR = QColor(255, 210, 0)
+GUIDE_COLOR = QColor(255, 60, 200)   # направляющие выравнивания — пурпурные, отличаются от привязки
 
 
 def _checker_brush():
@@ -119,6 +120,7 @@ class CanvasView(QGraphicsView):
         self.hover_handle = None
         self.snap_hit = None
         self.snap_target = None   # объект под последней привязкой (см. SnapManager.last_target)
+        self.guide_lines = []     # направляющие выравнивания [(откуда, куда)]; видны при snap_hit[1] == "guide"
         self.rubber = None
         self._pan = None
         self._zoomdrag = None
@@ -151,7 +153,17 @@ class CanvasView(QGraphicsView):
         """n экранных пикселей в единицах сцены."""
         return n / self.scale_factor()
 
-    def snap(self, pt: QPointF, exclude=(), extra=None) -> QPointF:
+    @staticmethod
+    def snap_disabled() -> bool:
+        """Зажат Ctrl — привязки и направляющие временно отключены."""
+        return bool(QGuiApplication.queryKeyboardModifiers() & Qt.ControlModifier)
+
+    def guide_tol(self) -> float:
+        return self.px(max(4.0, self.ed.snap.radius_px * 0.7))
+
+    def snap(self, pt: QPointF, exclude=(), extra=None, anchor=None, guides=True, refs=None) -> QPointF:
+        """Привязка к точкам объектов; если её нет — выравнивание по направляющим (guides=True):
+        вертикаль/горизонталь через точки объектов (и refs), 0/45/90° от anchor."""
         # зажат Ctrl — привязки временно отключены (тянуть/рисовать свободно)
         if QGuiApplication.queryKeyboardModifiers() & Qt.ControlModifier:
             self.snap_target = None
@@ -161,6 +173,11 @@ class CanvasView(QGraphicsView):
             return QPointF(pt)
         res = self.ed.snap.find(self.ed.doc, pt, self.px(self.ed.snap.radius_px), exclude, extra)
         self.snap_target = self.ed.snap.last_target if res else None
+        if res is None and guides:
+            g = self.ed.snap.find_guides(self.ed.doc, pt, self.guide_tol(), exclude, extra, anchor, refs)
+            if g is not None:
+                res = (g[0], "guide")
+                self.guide_lines = g[1]
         if res != self.snap_hit:
             self.snap_hit = res
             self.viewport().update()
@@ -558,7 +575,10 @@ class CanvasView(QGraphicsView):
 
         # snap indicator
         if self.snap_hit is not None:
-            self._draw_snap(painter, *self.snap_hit)
+            if self.snap_hit[1] == "guide":
+                self._draw_guides(painter, self.guide_lines)
+            else:
+                self._draw_snap(painter, *self.snap_hit)
         painter.restore()
 
     def _draw_handle(self, painter, sp: QPointF, hover: bool, kind="point", glued=False):
@@ -610,6 +630,38 @@ class CanvasView(QGraphicsView):
         # приклеенный конец (двигается вместе с объектом, к которому привязан) — зелёный
         painter.setBrush(QColor(255, 140, 0) if hover else QColor(60, 200, 90) if glued else QColor(255, 255, 255))
         painter.drawRect(r)
+
+    def show_guides(self, lines):
+        """Показать направляющие (например, при перемещении объектов); [] — убрать."""
+        self.guide_lines = list(lines)
+        hit = (QPointF(lines[0][1]), "guide") if lines else None
+        if hit != self.snap_hit:
+            self.snap_hit = hit
+        self.viewport().update()
+
+    def _draw_guides(self, painter, lines):
+        ext = self.px(14)
+        pen = QPen(GUIDE_COLOR, 1, Qt.DashLine)
+        pen.setCosmetic(True)
+        for a, b in lines:
+            dx, dy = b.x() - a.x(), b.y() - a.y()
+            ln = math.hypot(dx, dy) or 1.0
+            ux, uy = dx / ln, dy / ln
+            painter.setPen(pen)
+            painter.drawLine(QPointF(a.x() - ux * ext, a.y() - uy * ext), QPointF(b.x() + ux * ext, b.y() + uy * ext))
+            # крестик — точка, с которой выровнялись
+            k = self.px(4)
+            solid = QPen(GUIDE_COLOR, 1.5)
+            solid.setCosmetic(True)
+            painter.setPen(solid)
+            painter.drawLine(QPointF(a.x() - k, a.y() - k), QPointF(a.x() + k, a.y() + k))
+            painter.drawLine(QPointF(a.x() - k, a.y() + k), QPointF(a.x() + k, a.y() - k))
+        if lines:
+            p = lines[0][1]
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(GUIDE_COLOR)
+            r = self.px(3)
+            painter.drawEllipse(p, r, r)
 
     def _draw_snap(self, painter, p: QPointF, kind: str):
         s = self.px(6)

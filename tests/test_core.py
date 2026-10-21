@@ -969,3 +969,61 @@ def test_glued_callout_tip_and_chain(ed):
     ed.sel.set([r])
     ed.nudge(5, 0)
     assert c.mapToScene(c.tip) == QPointF(105, 180)
+
+
+def test_guides_find_alignment(ed):
+    sn = ed.snap
+    a = line((100, 100), (200, 100))
+    ed.add_items([a])
+    tol = 6
+    # точка почти на вертикали конца линии — выравнивается по x
+    r = sn.find_guides(ed.doc, QPointF(202, 300), tol)
+    assert r is not None and r[0] == QPointF(200, 300)
+    assert QPointF(200, 100) in [g[0] for g in r[1]]   # направляющая идёт от конца линии
+    # от опорной точки — под 45°
+    r = sn.find_guides(ed.doc, QPointF(503, 498), tol, anchor=QPointF(400, 400))
+    assert abs(r[0].x() - r[0].y()) < 1e-6
+    # 45° от опорной точки и горизонталь конца линии — пересечение
+    r = sn.find_guides(ed.doc, QPointF(302, 103), tol, anchor=QPointF(500, 300))
+    assert abs(r[0].y() - 100) < 1e-6 and abs(r[0].x() - 300) < 1e-6 and len(r[1]) == 2
+    # горизонталь с серединой линии
+    r = sn.find_guides(ed.doc, QPointF(150 + 300, 104), tol)
+    assert r[0].y() == 100
+    # далеко от всех — нет
+    assert sn.find_guides(ed.doc, QPointF(333, 277), tol) is None
+    sn.guides = False
+    assert sn.find_guides(ed.doc, QPointF(202, 300), tol) is None
+
+
+def test_guides_when_drawing_and_moving(ed):
+    from PySide6.QtCore import Qt
+    from annotator.tools.base import ToolEvent
+    _tools_view(ed)
+    a = line((100, 100), (200, 100))
+    ed.add_items([a])
+    # рисуем линию: конец ставится на одну вертикаль с концом первой линии
+    ed.set_tool("line")
+    _drag(ed.tool, QPointF(400, 400), QPointF(203, 350))
+    b = [i for i in ed.doc.items_sorted() if i.TYPE == "line"][-1]
+    assert b.mapToScene(b.points[-1]).x() == 200
+    # перемещаем текст: его верх встаёт на горизонталь линии
+    t = TextItem({"text": "Метка", "bg": True})
+    t.setPos(500, 300)
+    ed.add_items([t])
+    ed.set_tool("select")
+    ed.sel.set([t])
+    tr = t.content_rect()
+    grab = tr.center()
+    target = grab + QPointF(-20, 100 - tr.top() + 3)    # верх текста на 3 px ниже y=100
+    _drag(ed.tool, grab, target)
+    assert abs(t.content_rect().top() - 100) < 1e-6
+    # полилиния: сегмент под 45° от предыдущей вершины
+    ed.set_tool("polyline")
+    tl = ed.tool
+    for p in (QPointF(600, 500), QPointF(700, 403)):
+        tl.press(ToolEvent(p, None, Qt.NoModifier, Qt.LeftButton, Qt.LeftButton))
+        tl.release(ToolEvent(p, None, Qt.NoModifier, Qt.LeftButton, Qt.NoButton))
+    tl.finish()
+    pl = [i for i in ed.doc.items() if i.TYPE == "polyline"][0]
+    p0, p1 = pl.scene_points()
+    assert abs((p1.x() - p0.x()) + (p1.y() - p0.y())) < 1e-6
