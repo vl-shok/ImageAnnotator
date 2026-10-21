@@ -688,14 +688,14 @@ def test_callout_multiple_leaders(ed):
     c.move_handle(idx_anchor, QPointF(b.right() + 30, b.top() + b.height() * 0.25))
     assert c.leaders[0][1][0] == 1.0
     ed.add_callout_leader(c, QPointF(500, 400))
-    assert len(c.leaders) == 2 and len(c.handles()) == 7   # 2×(острие, начало) + 2 изгиба + блок
+    assert len(c.leaders) == 2 and len(c.handles()) == 15   # 2×(острие, начало) + 2 изгиба + 8 рамки + блок
     assert abs(c.mapToScene(c.leaders[1][0]).x() - 500) < 1e-6
     d = c.to_dict(full=True)
     c2 = CalloutItem()
     c2.apply_dict(d)
     assert len(c2.leaders) == 2 and c2.leaders[0][1] == c.leaders[0][1]
     # перемещение блока не двигает острия
-    c.move_handle(6, QPointF(10, 10))
+    c.move_handle(14, QPointF(10, 10))
     assert abs(c.mapToScene(c.leaders[1][0]).x() - 500) < 1e-6
     ed.remove_callout_leader(c, 1)
     assert len(c.leaders) == 1
@@ -1315,3 +1315,42 @@ def test_line_spacing_text_callout_resistor(ed):
     s1 = r.label_font().pixelSize()
     r.set_prop("line_spacing", 1.8)
     assert r.label_font().pixelSize() < s1
+
+
+def test_callout_box_resize(ed):
+    _tools_view(ed)
+    c = CalloutItem({"text": "Длинный комментарий к узлу"})
+    c.setPos(200, 200)
+    c.tip = QPointF(-120, 150)
+    ed.add_items([c])
+    tip0 = c.mapToScene(c.tip)
+    b0 = c.mapToScene(c.box()).boundingRect()
+    ed.set_tool("select")
+    ed.sel.set([c])
+    kinds = c.handle_kinds()
+    i_br = 3 * len(c.leaders) + c.HANDLE_IDS.index("br")
+    assert kinds[i_br] == "box" and kinds[-1] == "move"
+    br = c.mapToScene(c.handles()[i_br])
+    _drag(ed.tool, br, br + QPointF(120, 60))
+    b1 = c.mapToScene(c.box()).boundingRect()
+    assert abs(b1.width() - (b0.width() + 120)) < 0.6 and abs(b1.height() - (b0.height() + 60)) < 0.6
+    assert (b1.topLeft() - b0.topLeft()).manhattanLength() < 1e-6     # левый верхний угол на месте
+    assert c.mapToScene(c.tip) == tip0                                 # стрелка указывает туда же
+    assert not c.props["auto_size"]
+    # левая сторона: блок растёт влево, острие на месте
+    i_l = 3 * len(c.leaders) + c.HANDLE_IDS.index("l")
+    if c.handle_kinds()[i_l] == "box":
+        l = c.mapToScene(c.handles()[i_l])
+        _drag(ed.tool, l, l - QPointF(50, 0))
+        assert abs(c.mapToScene(c.box()).boundingRect().left() - (b0.left() - 50)) < 0.6
+        assert c.mapToScene(c.tip) == tip0
+    # сужение — текст переносится, высота блока задана рамкой
+    c2 = CalloutItem()
+    c2.apply_dict(c.to_dict(full=True))
+    assert c2.box().size() == c.box().size()
+    # «Размер по тексту» — обратно к автоматическому размеру; отмена возвращает рамку
+    ed.sel.set([c])
+    ed.set_prop("auto_size", True)
+    assert abs(c.box().width() - b0.width()) < 0.6
+    ed.undo.undo()
+    assert not c.props["auto_size"]

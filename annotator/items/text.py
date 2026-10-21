@@ -342,14 +342,17 @@ class CalloutItem(AnnotationItem):
     DEFAULTS = {"text": "Комментарий", "font": DEFAULT_FONT, "size": 18, "bold": False, "italic": False, "line_spacing": 1.0,
                 "color": "#000000", "align": "left", "bg": True, "bg_color": "#fff7c2",
                 "bg_opacity": 0.95, "padding": 6, "opacity": 1.0,
-                "line_color": "#ff2020", "line_width": 2.5, "tip": "arrow", "tip_size": 14.0, "border": True}
-    PROPS = text_props() + [
+                "line_color": "#ff2020", "line_width": 2.5, "tip": "arrow", "tip_size": 14.0, "border": True,
+                "valign": "middle", "auto_size": True, "box_w": 0.0, "box_h": 0.0}
+    PROPS = text_props(valign=True) + [
+        PropSpec("auto_size", "Размер по тексту", "bool", "Рамка"),
         PropSpec("line_color", "Цвет линии", "color", S_LEADER),
         PropSpec("line_width", "Толщина", "float", S_LEADER, min=0.5, max=40, step=0.5, suffix=" px"),
         PropSpec("tip", "Наконечник", "enum", S_LEADER, options=CAP_STYLES, pair=cap_size("tip_size")),
         PropSpec("border", "Рамка блока", "bool", S_LEADER),
         OPACITY,
     ]
+    HANDLE_IDS = TextItem.HANDLE_IDS
 
     def __init__(self, props=None, tip: QPointF | None = None):
         super().__init__(props)
@@ -393,9 +396,22 @@ class CalloutItem(AnnotationItem):
     def props_changed(self):
         self._layout = None
 
+    def fixed_size(self):
+        """Размер блока, заданный маркерами рамки (None — по тексту)."""
+        p = self.props
+        if p.get("auto_size", True) or not p.get("box_w") or not p.get("box_h"):
+            return None
+        return float(p["box_w"]), float(p["box_h"])
+
+    def set_prop(self, name, value):
+        if name == "auto_size" and not value and not self.props.get("box_w"):
+            b = self.box()  # «зафиксировать» текущий размер
+            self.props["box_w"], self.props["box_h"] = round(b.width(), 2), round(b.height(), 2)
+        super().set_prop(name, value)
+
     def layout(self):
         if self._layout is None:
-            self._layout = layout_text(self.props)
+            self._layout = layout_text(self.props, self.fixed_size())
         return self._layout
 
     def box(self):
@@ -569,7 +585,7 @@ class CalloutItem(AnnotationItem):
     def margin(self):
         return float(self.props.get("line_width", 2)) * 6 + 12 + float(self.props.get("tip_size") or 0)
 
-    # ручки: [острие 1, начало 1, острие 2, начало 2, …, изгиб 1, изгиб 2, …, блок]
+    # ручки: [острие 1, начало 1, острие 2, начало 2, …, изгиб 1, изгиб 2, …, 8 ручек рамки, блок]
     def handles(self):
         hs = []
         for i, (tip, _) in enumerate(self.leaders):
@@ -579,17 +595,73 @@ class CalloutItem(AnnotationItem):
         for i, (tip, _) in enumerate(self.leaders):
             m = self.bend_mid(i)
             hs.append(m if m is not None else QPointF(tip))
-        hs.append(self.box().center())     # маркер перемещения блока (стрелки остаются на месте)
+        b = self.box()
+        c = b.center()
+        hs += [b.topLeft(), QPointF(c.x(), b.top()), b.topRight(), QPointF(b.right(), c.y()),
+               b.bottomRight(), QPointF(c.x(), b.bottom()), b.bottomLeft(), QPointF(b.left(), c.y())]
+        hs.append(c)     # маркер перемещения блока (стрелки остаются на месте)
         return hs
 
     def handle_kinds(self):
         n = len(self.leaders)
         # у указателя без линии (острие внутри блока) ручки изгиба нет
         bends = ["bend" if self.start_point(i) is not None else "hidden" for i in range(n)]
-        return ["tip", "anchor"] * n + bends + ["move"]
+        # маркер рамки, на котором стоит начало стрелки (ромб), прячем — ромб важнее, тянуть можно за углы
+        starts = [s for s in (self.start_point(i) for i in range(n)) if s is not None]
+        box = ["hidden" if any(abs(h.x() - s.x()) + abs(h.y() - s.y()) < 0.5 for s in starts) else "box"
+               for h in self.handles()[3 * n:3 * n + 8]]
+        return ["tip", "anchor"] * n + bends + box + ["move"]
+
+    def box_handle(self, idx) -> str | None:
+        """Ручка рамки блока: её id (tl, t, tr, r, br, b, bl, l) или None."""
+        k = idx - 3 * len(self.leaders)
+        return self.HANDLE_IDS[k] if 0 <= k < 8 else None
+
+    def begin_handle_drag(self, idx):
+        if self.box_handle(idx) is not None:
+            # состояние на начало перетаскивания: рамка, положение, острия
+            self._drag = (QRectF(self.box()), QPointF(self.pos()), [QPointF(t) for t, _ in self.leaders])
+        return None
+
+    def _resize_box(self, hid, p, symmetric):
+        """Ручки рамки: свободно меняем ширину/высоту блока (Alt — от центра); острия стрелок на месте."""
+        drag = getattr(self, "_drag", None)
+        if not isinstance(drag, tuple):
+            drag = (QRectF(self.box()), QPointF(self.pos()), [QPointF(t) for t, _ in self.leaders])
+        r0, pos0, tips0 = drag
+        p = p + (self.pos() - pos0)          # точка в системе координат начала перетаскивания
+        if symmetric:
+            c = r0.center()
+            hw, hh = r0.width() / 2, r0.height() / 2
+            if "l" in hid or "r" in hid:
+                hw = abs(p.x() - c.x())
+            if "t" in hid or "b" in hid:
+                hh = abs(p.y() - c.y())
+            new = QRectF(c.x() - hw, c.y() - hh, 2 * hw, 2 * hh)
+        else:
+            l, t_, r, b = r0.left(), r0.top(), r0.right(), r0.bottom()
+            if "l" in hid:
+                l = p.x()
+            if "r" in hid:
+                r = p.x()
+            if "t" in hid:
+                t_ = p.y()
+            if "b" in hid:
+                b = p.y()
+            new = QRectF(QPointF(l, t_), QPointF(r, b)).normalized()
+        w, h = max(10.0, new.width()), max(10.0, new.height())
+        self.props["auto_size"] = False
+        self.props["box_w"] = round(w, 2)
+        self.props["box_h"] = round(h, 2)
+        self._layout = None
+        # блок всегда начинается в (0, 0): сдвигаем объект, острия — обратно на свои места на сцене
+        shift = new.topLeft()
+        self.setPos(pos0 + shift)
+        for ld, t0 in zip(self.leaders, tips0):
+            ld[0] = t0 - shift
 
     def leader_index(self, idx):
-        """(номер указателя, 'tip' | 'anchor' | 'bend') для индекса ручки или None (блок)."""
+        """(номер указателя, 'tip' | 'anchor' | 'bend') для индекса ручки или None (рамка / блок)."""
         n = len(self.leaders)
         if idx < 2 * n:
             return idx // 2, ("tip" if idx % 2 == 0 else "anchor")
@@ -605,6 +677,11 @@ class CalloutItem(AnnotationItem):
         return [(self.mapToScene(p), k) for p, k in rect_snap_points(self.box()) if k != "center"]
 
     def handle_cursor(self, idx):
+        hid = self.box_handle(idx)
+        if hid is not None:
+            return {"tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor, "tr": Qt.SizeBDiagCursor,
+                    "bl": Qt.SizeBDiagCursor, "t": Qt.SizeVerCursor, "b": Qt.SizeVerCursor,
+                    "l": Qt.SizeHorCursor, "r": Qt.SizeHorCursor}[hid]
         li = self.leader_index(idx)
         if li is None:
             return Qt.SizeAllCursor
@@ -614,6 +691,11 @@ class CalloutItem(AnnotationItem):
 
     def move_handle(self, idx, p, constrain=False, symmetric=False):
         self.prepareGeometryChange()
+        hid = self.box_handle(idx)
+        if hid is not None:
+            self._resize_box(hid, p, symmetric)
+            self.update()
+            return
         li = self.leader_index(idx)
         if li is None:
             # двигаем только текстовый блок (центр — под курсор), точки указания остаются на месте
