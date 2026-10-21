@@ -103,6 +103,20 @@ class PathItem(AnnotationItem):
                 return self.insert_vertex(a + 1, mid(self.points[a], self.points[b]))
         return None
 
+    def handle_snap_extra(self, idx):
+        """Перетаскивание вершины полилинии/полигона: магнит видит остальные свои вершины
+        (например, чтобы замкнуть конец на начало) — как при рисовании."""
+        if not self.EDIT_VERTICES or not (0 <= idx < len(self.points)):
+            return None
+        n = len(self.points)
+        out = []
+        for i, p in enumerate(self.points):
+            if i == idx:
+                continue
+            kind = "endpoint" if not self.CLOSED and i in (0, n - 1) else "vertex"
+            out.append((self.mapToScene(p), kind))
+        return out
+
     def handle_anchor(self, idx):
         n = len(self.points)
         if not (0 <= idx < n) or n < 2:

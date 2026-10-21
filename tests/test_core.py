@@ -1354,3 +1354,27 @@ def test_callout_box_resize(ed):
     assert abs(c.box().width() - b0.width()) < 0.6
     ed.undo.undo()
     assert not c.props["auto_size"]
+
+
+def test_polyline_drag_end_snaps_to_own_start(ed):
+    from PySide6.QtCore import Qt
+    from annotator.tools.base import ToolEvent
+    _tools_view(ed)
+    ed.set_tool("polyline")
+    tl = ed.tool
+    for p in (QPointF(100, 100), QPointF(300, 120), QPointF(320, 300), QPointF(150, 280)):
+        tl.press(ToolEvent(p, None, Qt.NoModifier, Qt.LeftButton, Qt.LeftButton))
+        tl.release(ToolEvent(p, None, Qt.NoModifier, Qt.LeftButton, Qt.NoButton))
+    tl.finish()
+    pl = [i for i in ed.doc.items() if i.TYPE == "polyline"][0]
+    start = pl.scene_points()[0]
+    end = pl.scene_points()[-1]
+    # тянем конец к началу (чуть мимо) — магнит ставит его ровно в начало
+    ed.set_tool("select")
+    ed.sel.set([pl])
+    _drag(ed.tool, end, start + QPointF(4, -3))
+    assert pl.scene_points()[-1] == start
+    # и средняя вершина прилипает к другой своей вершине
+    mid_v = pl.scene_points()[1]
+    _drag(ed.tool, mid_v, pl.scene_points()[2] + QPointF(3, 3))
+    assert pl.scene_points()[1] == pl.scene_points()[2]
