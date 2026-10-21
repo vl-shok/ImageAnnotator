@@ -919,6 +919,8 @@ class BoxItem(AnnotationItem):
 
     def _resize_from(self, r0: QRectF, hid: str, p: QPointF, constrain: bool, keep_aspect: bool,
                      symmetric: bool = False):
+        if keep_aspect and len(hid) == 1 and r0.width() > 0 and r0.height() > 0:
+            return self._resize_side_keep_aspect(r0, hid, p, symmetric)
         if symmetric:
             c = r0.center()
             hw, hh = r0.width() / 2, r0.height() / 2
@@ -960,6 +962,32 @@ class BoxItem(AnnotationItem):
             return square_rect(QPointF(ax, ay), p)
         return QRectF(QPointF(left, top), QPointF(right, bottom)).normalized()
 
+    @staticmethod
+    def _resize_side_keep_aspect(r0: QRectF, hid: str, p: QPointF, symmetric: bool) -> QRectF:
+        """Боковой маркер с сохранением пропорций: вторая сторона меняется пропорционально,
+        симметрично относительно оси объекта."""
+        ratio = r0.width() / r0.height()
+        c = r0.center()
+        if hid in ("l", "r"):
+            if symmetric:
+                w = 2 * abs(p.x() - c.x())
+                x0 = c.x() - w / 2
+            else:
+                fixed = r0.right() if hid == "l" else r0.left()
+                w = abs(p.x() - fixed)
+                x0 = min(fixed, p.x())
+            h = w / ratio
+            return QRectF(x0, c.y() - h / 2, w, h)
+        if symmetric:
+            h = 2 * abs(p.y() - c.y())
+            y0 = c.y() - h / 2
+        else:
+            fixed = r0.bottom() if hid == "t" else r0.top()
+            h = abs(p.y() - fixed)
+            y0 = min(fixed, p.y())
+        w = h * ratio
+        return QRectF(c.x() - w / 2, y0, w, h)
+
     def _apply_rect(self, new_rect: QRectF, fixed_local: QPointF, fixed_scene: QPointF):
         """Установить прямоугольник так, чтобы неподвижная точка осталась на месте (с учётом поворота)."""
         self.prepareGeometryChange()
@@ -999,10 +1027,12 @@ class BoxItem(AnnotationItem):
         new = self._resize_from(r0, hid, p, constrain and not self.SHIFT_FREES, keep_aspect=keep, symmetric=symmetric)
         self._apply_rect(new, fixed_local, self._drag_anchor[1])
 
-    SHIFT_FREES = False   # True — Shift снимает сохранение пропорций (а не делает квадрат)
+    # Shift, нажатый во время растягивания, сохраняет пропорции, с которыми начали тянуть
+    # (а не делает квадрат). Shift, зажатый до захвата маркера, — двигать объект за точку (инструмент «Выбор»).
+    SHIFT_FREES = True
 
     def keep_aspect_for(self, hid: str, constrain: bool) -> bool:
-        return False
+        return bool(constrain)
 
     def outline_path(self):
         path = QPainterPath()

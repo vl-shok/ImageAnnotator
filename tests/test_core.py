@@ -11,7 +11,7 @@ from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from annotator.editor import Editor  # noqa: E402
-from annotator.items import ArrowItem, LineItem, RectItem, TextItem, NumberItem, CalloutItem  # noqa: E402
+from annotator.items import ArrowItem, CalloutItem, EllipseItem, LineItem, NumberItem, RectItem, TextItem  # noqa: E402
 from annotator.props import MIXED  # noqa: E402
 from annotator.ui.properties import common_specs, common_value  # noqa: E402
 
@@ -1144,3 +1144,40 @@ def test_pencil_brush_circle_follows_width(ed):
     # во время рисования — толщина рисуемой линии
     t.press(ToolEvent(QPointF(300, 300), None, Qt.NoModifier, Qt.LeftButton, Qt.LeftButton))
     assert t.brush_width() == float(t.temp.props["width"])
+
+
+def _corner(item, hid):
+    return item.mapToScene(item.handles()[item.HANDLE_IDS.index(hid)])
+
+
+def _drag_shift_late(t, a, b):
+    """Схватить маркер без Shift, потом зажать Shift и тянуть."""
+    from PySide6.QtCore import Qt
+    from annotator.tools.base import ToolEvent
+    t.press(ToolEvent(a, None, Qt.NoModifier, Qt.LeftButton, Qt.LeftButton))
+    t.move(ToolEvent((a + b) / 2, None, Qt.NoModifier, Qt.NoButton, Qt.LeftButton))
+    t.move(ToolEvent(b, None, Qt.ShiftModifier, Qt.NoButton, Qt.LeftButton))
+    t.release(ToolEvent(b, None, Qt.ShiftModifier, Qt.LeftButton, Qt.NoButton))
+
+
+def test_rect_resize_shift_keeps_aspect_not_square(ed):
+    from PySide6.QtCore import Qt
+    _tools_view(ed)
+    for cls in (RectItem, EllipseItem):
+        it = cls(QRectF(0, 0, 200, 100))
+        it.setPos(100, 100)
+        ed.add_items([it])
+        ed.set_tool("select")
+        ed.sel.set([it])
+        br = _corner(it, "br")
+        _drag(ed.tool, br, br + QPointF(50, 10))             # без Shift — свободно
+        assert (it.rect.width(), it.rect.height()) == (250, 110)
+        ratio = it.rect.width() / it.rect.height()
+        br = _corner(it, "br")
+        _drag_shift_late(ed.tool, br, br + QPointF(80, 0))   # Shift во время — пропорции, не квадрат
+        assert abs(it.rect.width() / it.rect.height() - ratio) < 1e-4
+        assert abs(it.rect.width() - it.rect.height()) > 1
+        b = _corner(it, "b")
+        _drag_shift_late(ed.tool, b, b + QPointF(0, 30))     # нижняя сторона с Shift — тоже пропорционально
+        assert abs(it.rect.width() / it.rect.height() - ratio) < 1e-4
+        ed.doc.remove_item(it)
