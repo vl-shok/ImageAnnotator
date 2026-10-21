@@ -212,6 +212,24 @@ class DimensionItem(AnnotationItem):
                 self.offset = 0.0 if constrain else rel.x() * n.x() + rel.y() * n.y()
         self.update()
 
+    # приклеивание: «a», «b» — измеряемые точки
+    def glue_ends(self):
+        return {"a": QPointF(self.a), "b": QPointF(self.b)}
+
+    def set_glue_end(self, key, p):
+        self.prepareGeometryChange()
+        if key == "a":
+            self.a = QPointF(p)
+        elif key == "b":
+            self.b = QPointF(p)
+        self.update()
+
+    def handle_glue_key(self, idx):
+        return {0: "a", 1: "b"}.get(idx)
+
+    def creation_glue_keys(self):
+        return ("a", "b")
+
     def snap_points(self):
         a2, b2 = self.dim_points()
         out = [(QPointF(self.a), "endpoint"), (QPointF(self.b), "endpoint"), (mid(a2, b2), "midpoint")]

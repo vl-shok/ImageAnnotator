@@ -196,6 +196,8 @@ class AnnotationItem(QGraphicsItem):
         self.locked = False
         self.obj_visible = True
         self.group_id: str | None = None
+        # приклеенные концы: ключ конца → {"uid": объект, "i": № точки привязки, "k": вид, "p": [x, y] локально}
+        self.glue: dict[str, dict] = {}
 
     # ---------------------------------------------------------- serialization
     def geom_to_dict(self, full: bool = False) -> dict:
@@ -205,7 +207,7 @@ class AnnotationItem(QGraphicsItem):
         pass
 
     def to_dict(self, full: bool = False) -> dict:
-        return {
+        d = {
             "type": self.TYPE,
             "id": self.uid,
             "layer": self.layer_id,
@@ -217,6 +219,9 @@ class AnnotationItem(QGraphicsItem):
             "props": copy.deepcopy(self.props),
             "geom": self.geom_to_dict(full),
         }
+        if self.glue:
+            d["glue"] = copy.deepcopy(self.glue)
+        return d
 
     def state(self) -> dict:
         """Состояние для Undo (без тяжёлых данных)."""
@@ -231,6 +236,7 @@ class AnnotationItem(QGraphicsItem):
         self.locked = bool(d.get("locked", False))
         self.obj_visible = bool(d.get("visible", True))
         self.group_id = d.get("group")
+        self.glue = copy.deepcopy(d.get("glue") or {})
         props = copy.deepcopy(self.DEFAULTS)
         props.update(copy.deepcopy(d.get("props", {})))
         self.props = props
@@ -361,6 +367,30 @@ class AnnotationItem(QGraphicsItem):
     def snap_points(self) -> list[tuple[QPointF, str]]:
         return []
 
+    # ---------------------------------------------------------- изгиб
+    def is_bent(self) -> bool:
+        return getattr(self, "ctrl", None) is not None
+
+    def straighten(self, handle_idx=None):
+        pass
+
+    # ---------------------------------------------------------- приклеивание концов (магнит)
+    def glue_ends(self) -> dict[str, QPointF]:
+        """Концы, которые приклеиваются к точке привязки другого объекта: ключ → локальная точка."""
+        return {}
+
+    def set_glue_end(self, key: str, p: QPointF):
+        """Переместить приклеенный конец key в локальную точку p (вслед за объектом-целью)."""
+        pass
+
+    def handle_glue_key(self, idx: int) -> str | None:
+        """Ключ конца, которым управляет ручка idx (None — ручка не конец)."""
+        return None
+
+    def creation_glue_keys(self) -> tuple[str, str] | None:
+        """Ключи (первая точка, последняя точка) для приклеивания при рисовании."""
+        return None
+
     # ---------------------------------------------------------- misc
     def describe(self) -> str:
         return self.TITLE
@@ -375,5 +405,6 @@ class AnnotationItem(QGraphicsItem):
         from . import create_from_dict
         d = self.to_dict(full=True)
         d["id"] = None
+        d.pop("glue", None)
         it = create_from_dict(d, keep_id=False)
         return it

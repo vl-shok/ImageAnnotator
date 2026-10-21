@@ -43,6 +43,8 @@ class SelectTool(Tool):
         self.h_idx = -1
         self.click_item = None
         self.h_text = None
+        self.followers = []      # объекты с концами, приклеенными к изменяемым (едут следом)
+        self.f_before = []
 
     def busy(self):
         return self.state is not None
@@ -50,7 +52,7 @@ class SelectTool(Tool):
     def hint(self):
         return ("Клик — выбрать, Ctrl+клик — добавить, рамка ←/→ — пересечение/окно, Shift+ручка — двигать за точку, "
                 "Alt+ручка — от центра, «+» — добавить вершину, двойной клик по вершине — удалить, "
-                "средняя ручка линии/стрелки — изгиб, Ctrl+тянуть от рамки выноски — новая стрелка")
+                "средняя ручка линии/стрелки/указателя выноски — изгиб, Ctrl+тянуть от рамки выноски — новая стрелка")
 
     # ------------------------------------------------------------------
     def press(self, e: ToolEvent):
@@ -58,12 +60,13 @@ class SelectTool(Tool):
             return
         v, sel = self.view, self.ed.sel
         self._reset()
+        v.snap_target = None
         if self.pending_leader is not None:
             item, self.pending_leader = self.pending_leader, None
             v.viewport().setCursor(self.cursor)
             v.snap_hit = None
             if self.doc.contains(item):
-                self.ed.add_callout_leader(item, v.snap(e.pos, exclude=[item]))
+                self.ed.add_callout_leader(item, v.snap(e.pos, exclude=[item]), self.ed.glue_spec())
                 v.snap_hit = None
             return
         self.press_pos = QPointF(e.pos)
@@ -79,6 +82,7 @@ class SelectTool(Tool):
                 self.h_item, self.h_idx = co, 2 * (len(co.leaders) - 1)
                 co.begin_handle_drag(self.h_idx)
                 self.h_text = "Добавить стрелку"
+                self._start_followers([co])
                 self.state = "handle"
                 return
         h = v.hit_handle(e.pos)
@@ -95,7 +99,7 @@ class SelectTool(Tool):
                 self.state = None
                 return
             if e.alt and kind == "bend":
-                self.ed.straighten(item)
+                self.ed.straighten(item, idx)
                 self.state = None
                 return
             if e.shift:
@@ -108,6 +112,7 @@ class SelectTool(Tool):
                 self.before = [item.state()]
                 new_idx = item.begin_handle_drag(idx)
                 self.h_item, self.h_idx = item, (idx if new_idx is None else new_idx)
+                self._start_followers([item])
                 self.state = "handle"
             return
         it = v.hit_item(e.pos)
@@ -144,6 +149,7 @@ class SelectTool(Tool):
             self.state = "move"
             self.before = [i.state() for i in self.items]
             self.orig_pos = {i: QPointF(i.pos()) for i in self.items}
+            self._start_followers(self.items)
             v.viewport().setCursor(Qt.ClosedHandCursor if not self.from_handle else Qt.SizeAllCursor)
         if self.state == "move":
             target = self.grab + (e.pos - self.press_pos)
@@ -151,15 +157,17 @@ class SelectTool(Tool):
                 target = constrain_axis(self.grab, target)
                 v.snap_hit = None
             else:
-                target = v.snap(target, exclude=self.items)
+                target = v.snap(target, exclude=self.items + self.followers)
             delta = target - self.grab
             for i in self.items:
                 i.setPos(self.orig_pos[i] + delta)
+            self.ed.apply_glue(self.followers)
             self.doc.itemsModified.emit()
         elif self.state == "handle":
             item = self.h_item
-            p = v.snap(e.pos, exclude=[item], extra=item.handle_snap_extra(self.h_idx))
+            p = v.snap(e.pos, exclude=[item] + self.followers, extra=item.handle_snap_extra(self.h_idx))
             item.move_handle(self.h_idx, item.mapFromScene(p), constrain=e.shift, symmetric=e.alt)
+            self.ed.apply_glue(self.followers)
             self.doc.itemsModified.emit()
         elif self.state == "rubber":
             if self.screen_dist(e.pos, self.press_pos) >= DRAG_THRESHOLD:
@@ -173,9 +181,13 @@ class SelectTool(Tool):
         v, sel = self.view, self.ed.sel
         st = self.state
         if st == "move":
-            self.ed.record_items(self.items, self.before, "Перемещение")
+            self.ed.unglue_detached(self.items)
+            self.ed.record_items(self.items + self.followers, self.before + self.f_before, "Перемещение")
         elif st == "handle":
-            self.ed.record_items([self.h_item], self.before, getattr(self, "h_text", None) or "Изменение формы")
+            # конец, отпущенный на точке привязки другого объекта, приклеивается к нему (иначе — отклеивается)
+            self.ed.set_glue(self.h_item, self.h_item.handle_glue_key(self.h_idx), self.ed.glue_spec())
+            self.ed.record_items([self.h_item] + self.followers, self.before + self.f_before,
+                                 getattr(self, "h_text", None) or "Изменение формы")
         elif st == "pending" and self.click_item is not None and not e.ctrl:
             # клик по уже выбранному объекту в группе выделения — выбрать только его
             if len(sel.items) > 1 and not self.click_item.group_id:
@@ -211,7 +223,7 @@ class SelectTool(Tool):
                 self.ed.delete_vertex(item, idx)
                 return
             if kind == "bend":
-                self.ed.straighten(item)
+                self.ed.straighten(item, idx)
                 return
             if kind in ("tip", "anchor") and item.TYPE == "callout":
                 n = idx // 2
@@ -220,6 +232,10 @@ class SelectTool(Tool):
         it = self.view.hit_item(e.pos)
         if it is not None:
             self.ed.edit_item(it)
+
+    def _start_followers(self, items):
+        self.followers = self.ed.glue_followers(items)
+        self.f_before = [i.state() for i in self.followers]
 
     def _callout_border_at(self, pos):
         """Выноска, рамка которой под курсором (с допуском в несколько экранных пикселей)."""
@@ -253,6 +269,8 @@ class SelectTool(Tool):
                 i.apply_dict(st)
         elif self.state == "handle" and self.before:
             self.h_item.apply_dict(self.before[0])
+        for i, st in zip(self.followers, self.f_before):
+            i.apply_dict(st)
         self.doc.relayer()
         if self.view:
             self.view.rubber = None

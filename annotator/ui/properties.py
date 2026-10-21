@@ -155,7 +155,7 @@ class PropertiesPanel(QScrollArea):
         if all(i.locked for i in items):
             for sec_w in sections.values():
                 sec_w.body.setEnabled(False)
-        bent = [i for i in items if getattr(i, "ctrl", None) is not None]
+        bent = [i for i in items if i.is_bent()]
         if bent:
             sec = Section("Изгиб")
             self.lay.addWidget(sec)

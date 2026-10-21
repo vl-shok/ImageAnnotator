@@ -65,12 +65,14 @@ class TwoPointTool(Tool, _TempMixin):
             self._finish()
             return
         self.p0 = self.view.snap(e.pos)
+        self.g0, self.g1 = self.ed.glue_spec(), None   # концы, попавшие магнитом на объект, приклеиваются
         self._start_temp(self.cls())
         self.temp.set_drag(self.p0, self.p0)
         self.click_mode = False
 
     def _update(self, e):
         p1 = self.view.snap(e.pos, exclude=[self.temp])
+        self.g1 = None if e.shift else self.ed.glue_spec()
         self.temp.set_drag(self.p0, p1, constrain=e.shift, center=e.alt)
 
     def move(self, e: ToolEvent):
@@ -93,6 +95,10 @@ class TwoPointTool(Tool, _TempMixin):
         if max(r.width(), r.height()) * self.view.scale_factor() < MIN_SIZE_PX:
             self._drop_temp()
         else:
+            keys = item.creation_glue_keys()
+            if keys:
+                self.ed.set_glue(item, keys[0], self.g0)
+                self.ed.set_glue(item, keys[1], self.g1)
             self._commit_temp(self.title)
         self.click_mode = False
         self.view.snap_hit = None
@@ -139,12 +145,14 @@ class PolyTool(Tool, _TempMixin):
         if self.temp is None:
             p = self.view.snap(e.pos)
             self.pts = [p]
+            self.g_first, self.g_last = self.ed.glue_spec(), None
             self._start_temp(self.cls())
             self.temp.set_scene_points([p, p])
             return
         p = self._floating(e)
         if self.pts and dist(p, self.pts[-1]) * self.view.scale_factor() < 2:
             return
+        self.g_last = None if e.shift else self.ed.glue_spec()
         self.pts.append(p)
         self.temp.set_scene_points(self.pts + [p])
 
@@ -163,6 +171,7 @@ class PolyTool(Tool, _TempMixin):
         if ev.key() == Qt.Key_Backspace:
             if len(self.pts) > 1:
                 self.pts.pop()
+                self.g_last = None
                 self.temp.set_scene_points(self.pts + [self.pts[-1]])
             else:
                 self.cancel()
@@ -183,6 +192,10 @@ class PolyTool(Tool, _TempMixin):
             self.pts = []
             return True
         self.temp.set_scene_points(clean)
+        keys = self.temp.creation_glue_keys()
+        if keys:
+            self.ed.set_glue(self.temp, keys[0], self.g_first)
+            self.ed.set_glue(self.temp, keys[1], self.g_last)
         self._commit_temp(self.title)
         self.pts = []
         self.view.snap_hit = None
@@ -206,6 +219,7 @@ class PolyTool(Tool, _TempMixin):
             return
         if len(self.pts) > 1:
             self.pts.pop()
+            self.g_last = None
             self.temp.set_scene_points(self.pts + [self.pts[-1]])
         else:
             self.cancel()
@@ -384,8 +398,10 @@ class CalloutTool(Tool, _TempMixin):
             return
         if self.temp is None or e.button != Qt.LeftButton:
             return
+        glue = None
         if self.screen_dist(e.pos, self.p0) > MIN_SIZE_PX * 3:
             tip = self.view.snap(e.pos, exclude=[self.temp])
+            glue = self.ed.glue_spec()
         else:   # просто клик — стрелка вниз-влево по умолчанию
             k = 1.0 / self.view.scale_factor()
             tip = self.p0 + QPointF(-70 * k, 70 * k)
@@ -397,6 +413,7 @@ class CalloutTool(Tool, _TempMixin):
             return
         self.temp.set_prop("text", txt)
         self._place(tip)          # размер блока изменился — центр остаётся в точке нажатия
+        self.ed.set_glue(self.temp, "t0", glue)
         self._commit_temp(self.title)
 
     def cancel(self):
@@ -433,6 +450,7 @@ class NumberTool(Tool, _TempMixin):
         if e.button != Qt.LeftButton:
             return
         self.p0 = self.view.snap(e.pos)
+        self.g0 = self.ed.glue_spec()   # острие указателя — в точке нажатия
         self._start_temp(NumberItem({"number": self.doc.next_number()}))
         self.temp.setPos(self.p0)
 
@@ -450,6 +468,8 @@ class NumberTool(Tool, _TempMixin):
     def release(self, e):
         if self.temp is None or e.button != Qt.LeftButton:
             return
+        if self.temp.has_leader():
+            self.ed.set_glue(self.temp, "t", self.g0)
         self._commit_temp(self.title)
         self.view.snap_hit = None
 

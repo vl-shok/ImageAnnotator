@@ -62,8 +62,11 @@ class Editor(QObject):
         items = list(items)
         if not items:
             return
+        followers = self.glue_followers(items)   # приклеенные концы едут вслед за изменёнными объектами
+        items += followers
         before = [i.state() for i in items]
         fn()
+        self.apply_glue(followers)
         after = [i.state() for i in items]
         if before == after:
             return
@@ -96,6 +99,76 @@ class Editor(QObject):
         self.push(AddCmd(self.doc, items, text))
         if select:
             self.sel.set(items)
+
+    # ================================================================ glue (приклеенные концы)
+    def glue_spec(self) -> dict | None:
+        """Приклеивание к объекту под последней привязкой холста (None — привязки к объекту нет)."""
+        t = self.view.snap_target if self.view is not None else None
+        if t is None:
+            return None
+        item, idx, lp = t
+        if not self.doc.contains(item):
+            return None
+        kind = item.snap_points()[idx][1] if idx is not None else "edge"
+        return {"uid": item.uid, "i": idx, "k": kind, "p": [round(lp.x(), 3), round(lp.y(), 3)]}
+
+    @staticmethod
+    def set_glue(item, key, spec):
+        if key is None:
+            return
+        if spec is not None and spec["uid"] != item.uid:
+            item.glue[key] = spec
+        else:
+            item.glue.pop(key, None)
+
+    def glue_point(self, spec) -> QPointF | None:
+        """Текущая точка сцены, к которой приклеен конец (None — объект удалён)."""
+        target = self.doc.find(spec.get("uid"))
+        if target is None:
+            return None
+        i = spec.get("i")
+        if i is not None:
+            sps = target.snap_points()
+            if i < len(sps) and sps[i][1] == spec.get("k"):
+                return target.mapToScene(sps[i][0])
+        x, y = spec.get("p", (0, 0))
+        return target.mapToScene(QPointF(x, y))
+
+    def glue_followers(self, items) -> list:
+        """Объекты, концы которых (прямо или по цепочке) приклеены к items, — в порядке обновления."""
+        seen = {i.uid for i in items}
+        frontier, out = set(seen), []
+        while frontier:
+            nxt = set()
+            for it in self.doc.items():
+                if it.uid in seen or not it.glue or it.locked:
+                    continue
+                if any(g.get("uid") in frontier for g in it.glue.values()):
+                    out.append(it)
+                    seen.add(it.uid)
+                    nxt.add(it.uid)
+            frontier = nxt
+        return out
+
+    def apply_glue(self, followers):
+        for it in followers:
+            ends = it.glue_ends()
+            for key, spec in it.glue.items():
+                if key not in ends:
+                    continue
+                p = self.glue_point(spec)
+                if p is not None:
+                    lp = it.mapFromScene(p)
+                    if lp != ends[key]:
+                        it.set_glue_end(key, lp)
+
+    @staticmethod
+    def unglue_detached(items):
+        """Объекты сдвинули сами по себе — концы, приклеенные к объектам вне items, отклеиваются."""
+        uids = {i.uid for i in items}
+        for it in items:
+            if it.glue:
+                it.glue = {k: g for k, g in it.glue.items() if g.get("uid") in uids}
 
     # ================================================================ tools
     def register_tool(self, tool):
@@ -199,8 +272,10 @@ class Editor(QObject):
         items = []
         group_map = {}
         layer_id = self.doc.target_layer_id()
+        id_map = {}
         for d in dicts:
             d = dict(d)
+            old_id = d.get("id")
             d["id"] = None
             if d.get("group"):
                 d["group"] = group_map.setdefault(d["group"], uuid.uuid4().hex[:8])
@@ -210,6 +285,12 @@ class Editor(QObject):
                 it.layer_id = layer_id
             it.z_local = 1e9 + len(items)
             items.append(it)
+            if old_id:
+                id_map[old_id] = it.uid
+        # приклеенные концы остаются приклеенными только к вставленным вместе с ними объектам
+        for it in items:
+            if it.glue:
+                it.glue = {k: dict(g, uid=id_map[g["uid"]]) for k, g in it.glue.items() if g.get("uid") in id_map}
         return items
 
     def paste(self, at: QPointF | None = None):
@@ -252,6 +333,7 @@ class Editor(QObject):
         def fn():
             for i in items:
                 i.moveBy(dx, dy)
+            self.unglue_detached(items)
         self.change_items(items, fn, "Сдвиг", merge_key=("nudge", self.session))
 
     def rotate_selected(self, deg=45.0):
@@ -278,6 +360,7 @@ class Editor(QObject):
         def fn():
             for i in items:
                 i.rotate_step(deg, center)
+            self.unglue_detached(items)
         self.change_items(items, fn, f"Поворот {deg:+g}°")
         if center is not None:
             self._rot_center = ((tuple(i.uid for i in items), self.undo.index()), center)
@@ -385,6 +468,7 @@ class Editor(QObject):
                     dy = total.center().y() - r.center().y()
                 for i in its:
                     i.moveBy(dx, dy)
+            self.unglue_detached(items)
         self.change_items(items, fn, "Выравнивание")
 
     # ================================================================ layers
@@ -839,10 +923,14 @@ class Editor(QObject):
         self.change_items([item], lambda: item.remove_vertex(idx), "Удалить вершину")
 
     # ------------------------------------------------------------ указатели выноски
-    def add_callout_leader(self, item, tip_scene: QPointF):
+    def add_callout_leader(self, item, tip_scene: QPointF, glue=None):
         if item.TYPE != "callout" or item.locked:
             return
-        self.change_items([item], lambda: item.add_leader(item.mapFromScene(tip_scene)), "Добавить указатель")
+
+        def fn():
+            item.add_leader(item.mapFromScene(tip_scene))
+            self.set_glue(item, f"t{len(item.leaders) - 1}", glue)
+        self.change_items([item], fn, "Добавить указатель")
         self.sel.changed.emit()
 
     def remove_callout_leader(self, item, i):
@@ -868,10 +956,11 @@ class Editor(QObject):
             self.view.update_action_bar()
         self.message.emit("Щёлкните, куда должна указывать новая стрелка (Esc — отмена)")
 
-    def straighten(self, item):
-        if getattr(item, "ctrl", None) is None:
+    def straighten(self, item, handle_idx=None):
+        """Убрать изгиб. handle_idx — ручка изгиба (у выноски — свой указатель), None — весь объект."""
+        if not item.is_bent():
             return
-        self.change_items([item], item.straighten, "Выпрямить")
+        self.change_items([item], lambda: item.straighten(handle_idx), "Выпрямить")
 
     # ================================================================ groups
     def groups(self) -> dict:

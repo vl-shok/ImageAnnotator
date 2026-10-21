@@ -118,6 +118,7 @@ class CanvasView(QGraphicsView):
         self.hover_item = None
         self.hover_handle = None
         self.snap_hit = None
+        self.snap_target = None   # объект под последней привязкой (см. SnapManager.last_target)
         self.rubber = None
         self._pan = None
         self._zoomdrag = None
@@ -153,11 +154,13 @@ class CanvasView(QGraphicsView):
     def snap(self, pt: QPointF, exclude=(), extra=None) -> QPointF:
         # зажат Ctrl — привязки временно отключены (тянуть/рисовать свободно)
         if QGuiApplication.queryKeyboardModifiers() & Qt.ControlModifier:
+            self.snap_target = None
             if self.snap_hit is not None:
                 self.snap_hit = None
                 self.viewport().update()
             return QPointF(pt)
         res = self.ed.snap.find(self.ed.doc, pt, self.px(self.ed.snap.radius_px), exclude, extra)
+        self.snap_target = self.ed.snap.last_target if res else None
         if res != self.snap_hit:
             self.snap_hit = res
             self.viewport().update()
@@ -170,7 +173,10 @@ class CanvasView(QGraphicsView):
         for it in reversed(sel.items):
             if not sel.is_movable(it):
                 continue
+            kinds = it.handle_kinds()
             for idx, h in enumerate(it.handles()):
+                if idx < len(kinds) and kinds[idx] == "hidden":
+                    continue
                 d = dist(it.mapToScene(h), pt)
                 if d <= bd:
                     best, bd = (it, idx), d
@@ -507,9 +513,13 @@ class CanvasView(QGraphicsView):
                     painter.setPen(pen)
                     painter.drawLine(top, it.mapToScene(hs[ri]))
                 for idx, h in enumerate(hs):
+                    kind = kinds[idx] if idx < len(kinds) else "point"
+                    if kind == "hidden":
+                        continue
                     sp = it.mapToScene(h)
                     hov = self.hover_handle == (it, idx)
-                    self._draw_handle(painter, sp, hov, kinds[idx] if idx < len(kinds) else "point")
+                    glued = it.glue and it.handle_glue_key(idx) in it.glue
+                    self._draw_handle(painter, sp, hov, kind, glued)
 
         # служебная графика инструмента (обрезка и т.п.)
         if self.ed.tool is not None:
@@ -551,7 +561,7 @@ class CanvasView(QGraphicsView):
             self._draw_snap(painter, *self.snap_hit)
         painter.restore()
 
-    def _draw_handle(self, painter, sp: QPointF, hover: bool, kind="point"):
+    def _draw_handle(self, painter, sp: QPointF, hover: bool, kind="point", glued=False):
         if kind == "insert":
             s = self.px(7 if hover else 5)
             r = QRectF(sp.x() - s / 2, sp.y() - s / 2, s, s)
@@ -597,7 +607,8 @@ class CanvasView(QGraphicsView):
         pen = QPen(QColor(20, 20, 20) if not hover else QColor(255, 255, 255), 1)
         pen.setCosmetic(True)
         painter.setPen(pen)
-        painter.setBrush(QColor(255, 140, 0) if hover else QColor(255, 255, 255))
+        # приклеенный конец (двигается вместе с объектом, к которому привязан) — зелёный
+        painter.setBrush(QColor(255, 140, 0) if hover else QColor(60, 200, 90) if glued else QColor(255, 255, 255))
         painter.drawRect(r)
 
     def _draw_snap(self, painter, p: QPointF, kind: str):

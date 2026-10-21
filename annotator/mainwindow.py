@@ -625,7 +625,7 @@ class MainWindow(QMainWindow):
                 return
             if kind == "bend":
                 m = QMenu(self)
-                m.addAction("Выпрямить", lambda: ed.straighten(item))
+                m.addAction("Выпрямить", lambda: ed.straighten(item, idx))
                 m.exec(gpos)
                 return
             if kind in ("tip", "anchor") and item.TYPE == "callout":

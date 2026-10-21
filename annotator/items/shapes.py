@@ -169,10 +169,36 @@ class BendMixin:
             return mid(p0, p1)
         return quad_point(p0, self.ctrl, p1, 0.5)
 
-    def straighten(self):
+    def straighten(self, handle_idx=None):
         self.prepareGeometryChange()
         self.ctrl = None
         self.update()
+
+    # приклеивание концов: «s» — начало, «e» — конец
+    def glue_ends(self):
+        if len(self.points) < 2:
+            return {}
+        return {"s": QPointF(self.points[0]), "e": QPointF(self.points[-1])}
+
+    def set_glue_end(self, key, p):
+        if len(self.points) < 2 or key not in ("s", "e"):
+            return
+        idx = 0 if key == "s" else len(self.points) - 1
+        self.prepareGeometryChange()
+        self._move_endpoint_keep_bend(idx, p)
+        self.points[idx] = QPointF(p)
+        self.update()
+
+    def handle_glue_key(self, idx):
+        n = len(self.points)
+        if n >= 2 and idx == 0:
+            return "s"
+        if n >= 2 and idx == n - 1:
+            return "e"
+        return None
+
+    def creation_glue_keys(self):
+        return ("s", "e")
 
     def _bend_to(self, m: QPointF):
         p0, p1 = self.points[0], self.points[-1]

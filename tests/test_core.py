@@ -688,14 +688,14 @@ def test_callout_multiple_leaders(ed):
     c.move_handle(idx_anchor, QPointF(b.right() + 30, b.top() + b.height() * 0.25))
     assert c.leaders[0][1][0] == 1.0
     ed.add_callout_leader(c, QPointF(500, 400))
-    assert len(c.leaders) == 2 and len(c.handles()) == 5
+    assert len(c.leaders) == 2 and len(c.handles()) == 7   # 2×(острие, начало) + 2 изгиба + блок
     assert abs(c.mapToScene(c.leaders[1][0]).x() - 500) < 1e-6
     d = c.to_dict(full=True)
     c2 = CalloutItem()
     c2.apply_dict(d)
     assert len(c2.leaders) == 2 and c2.leaders[0][1] == c.leaders[0][1]
     # перемещение блока не двигает острия
-    c.move_handle(4, QPointF(10, 10))
+    c.move_handle(6, QPointF(10, 10))
     assert abs(c.mapToScene(c.leaders[1][0]).x() - 500) < 1e-6
     ed.remove_callout_leader(c, 1)
     assert len(c.leaders) == 1
@@ -797,3 +797,175 @@ def test_callout_tool_box_first_then_tip(ed):
     tip = c.mapToScene(c.tip)
     assert abs(center.x() - 500) < 1e-6 and abs(center.y() - 150) < 1e-6
     assert abs(tip.x() - 250) < 1e-6 and abs(tip.y() - 420) < 1e-6
+
+
+def test_callout_leader_bend(ed):
+    c = CalloutItem({"text": "Комментарий"})
+    c.setPos(200, 200)
+    c.tip = QPointF(-100, 150)
+    ed.add_items([c])
+    n = len(c.leaders)
+    assert c.handle_kinds()[2 * n] == "bend"
+    a, t = c.start_point(0), c.tip
+    m = QPointF((a.x() + t.x()) / 2 + 30, (a.y() + t.y()) / 2 - 20)
+    c.move_handle(2 * n, m)
+    assert c.is_bent()
+    assert abs(c.bend_mid(0).x() - m.x()) < 1e-6 and abs(c.bend_mid(0).y() - m.y()) < 1e-6
+    # дуга проходит через ручку
+    from annotator.items.base import quad_point
+    q = quad_point(a, c.leader_ctrl(0), t, 0.5)
+    assert abs(q.x() - m.x()) < 1e-6 and abs(q.y() - m.y()) < 1e-6
+    # сохранение / загрузка
+    c2 = CalloutItem()
+    c2.apply_dict(c.to_dict(full=True))
+    assert all(abs(x - y) < 1e-5 for b1, b2 in zip(c2.bends, c.bends) for x, y in zip(b1, b2))
+    # изгиб следует за острием (хранится относительно указателя)
+    c.tip = QPointF(-200, 300)
+    assert c.is_bent()
+    ed.straighten(c, 2 * n)
+    assert not c.is_bent()
+    ed.undo.undo()
+    assert c.is_bent()
+    # острие внутри блока — линии нет, ручка изгиба скрыта
+    c.tip = c.box().center()
+    assert c.handle_kinds()[2 * n] == "hidden"
+
+
+def _tools_view(ed):
+    from annotator.canvas import CanvasView
+    from annotator.tools.draw_tools import make_tools
+    view = CanvasView(ed)
+    for tl in make_tools(ed):
+        ed.register_tool(tl)
+    return view
+
+
+def _drag(t, a, b, mods=None):
+    from PySide6.QtCore import Qt
+    from annotator.tools.base import ToolEvent
+    m = Qt.NoModifier if mods is None else mods
+    t.press(ToolEvent(a, None, m, Qt.LeftButton, Qt.LeftButton))
+    t.move(ToolEvent((a + b) / 2, None, m, Qt.NoButton, Qt.LeftButton))
+    t.move(ToolEvent(b, None, m, Qt.NoButton, Qt.LeftButton))
+    t.release(ToolEvent(b, None, m, Qt.LeftButton, Qt.NoButton))
+
+
+def test_glued_line_follows_target(ed):
+    _tools_view(ed)
+    r = RectItem()
+    r.set_drag(QPointF(100, 100), QPointF(200, 160))
+    ed.add_items([r])
+    corner = QPointF(200, 160)
+    # рисуем линию от угла прямоугольника — начало приклеивается
+    ed.set_tool("line")
+    _drag(ed.tool, QPointF(201, 161), QPointF(400, 300))
+    ln = [i for i in ed.doc.items() if i.TYPE == "line"][0]
+    assert ln.mapToScene(ln.points[0]) == corner
+    assert "s" in ln.glue and "e" not in ln.glue
+    end_before = ln.mapToScene(ln.points[-1])
+    # тащим прямоугольник — начало линии едет следом, конец на месте
+    ed.set_tool("select")
+    ed.sel.set([r])
+    _drag(ed.tool, QPointF(130, 100), QPointF(160, 140))   # за контур (прямоугольник без заливки)
+    assert ln.mapToScene(ln.points[0]) == corner + QPointF(30, 40)
+    assert ln.mapToScene(ln.points[-1]) == end_before
+    # растягивание прямоугольника за ручку — линия остаётся на своём углу
+    ed.sel.set([r])
+    _drag(ed.tool, QPointF(230, 200), QPointF(260, 220))     # правый нижний угол
+    assert ln.mapToScene(ln.points[0]) == QPointF(260, 220)
+    ed.undo.undo()
+    # отмена — одним шагом возвращает и прямоугольник, и линию
+    ed.undo.undo()
+    assert ln.mapToScene(ln.points[0]) == corner
+    # сдвиг стрелками и поворот цели тоже тянут линию
+    ed.sel.set([r])
+    ed.nudge(5, 0)
+    assert ln.mapToScene(ln.points[0]) == corner + QPointF(5, 0)
+
+
+def test_glued_handle_drag_moves_only_line(ed):
+    _tools_view(ed)
+    r = RectItem()
+    r.set_drag(QPointF(100, 100), QPointF(200, 160))
+    ed.add_items([r])
+    ed.set_tool("arrow")
+    _drag(ed.tool, QPointF(400, 300), QPointF(199, 159))
+    ar = [i for i in ed.doc.items() if i.TYPE == "arrow"][0]
+    assert "e" in ar.glue
+    # тянем ручку конца стрелки в пустое место — двигается только стрелка, конец отклеивается
+    ed.set_tool("select")
+    ed.sel.set([ar])
+    rect_state = r.state()
+    tip = ar.mapToScene(ar.points[-1])
+    _drag(ed.tool, tip, QPointF(600, 500))
+    assert r.state() == rect_state
+    assert "e" not in ar.glue
+    # перетаскивание ручки на угол прямоугольника — снова приклеивается
+    _drag(ed.tool, QPointF(600, 500), QPointF(101, 101))
+    assert "e" in ar.glue
+    ed.sel.set([r])
+    ed.nudge(0, 10)
+    assert ar.mapToScene(ar.points[-1]) == QPointF(100, 110)
+
+
+def test_moving_line_alone_unglues(ed):
+    _tools_view(ed)
+    r = RectItem()
+    r.set_drag(QPointF(100, 100), QPointF(200, 160))
+    ed.add_items([r])
+    ed.set_tool("line")
+    _drag(ed.tool, QPointF(200, 160), QPointF(400, 300))
+    ln = [i for i in ed.doc.items() if i.TYPE == "line"][0]
+    assert ln.glue
+    ed.sel.set([ln])
+    ed.nudge(10, 0)
+    assert not ln.glue
+    ed.undo.undo()
+    assert ln.glue
+    # вместе с целью — остаётся приклеенной
+    ed.sel.set([ln, r])
+    ed.nudge(10, 0)
+    assert ln.glue
+    # копия линии без цели не приклеена, копия вместе с целью — приклеена к копии цели
+    ed.sel.set([ln])
+    ed.duplicate()
+    assert not ed.sel.items[0].glue
+    ed.sel.set([ln, r])
+    ed.duplicate()
+    new_ln = [i for i in ed.sel.items if i.TYPE == "line"][0]
+    new_r = [i for i in ed.sel.items if i.TYPE == "rect"][0]
+    assert new_ln.glue["s"]["uid"] == new_r.uid
+
+
+def test_glued_callout_tip_and_chain(ed):
+    _tools_view(ed)
+    r = RectItem()
+    r.set_drag(QPointF(100, 100), QPointF(200, 160))
+    ed.add_items([r])
+    # линия от угла прямоугольника, вторая линия — от конца первой (цепочка)
+    ed.set_tool("line")
+    _drag(ed.tool, QPointF(200, 160), QPointF(400, 300))
+    _drag(ed.tool, QPointF(400, 300), QPointF(500, 100))
+    l1, l2 = [i for i in ed.doc.items_sorted() if i.TYPE == "line"]
+    assert l2.glue["s"]["uid"] == l1.uid
+    ed.sel.set([r])
+    ed.nudge(0, 20)
+    # первая линия тянется за прямоугольником, её конец не двигается — вторая на месте
+    assert l1.mapToScene(l1.points[0]) == QPointF(200, 180)
+    assert l2.mapToScene(l2.points[0]) == QPointF(400, 300)
+    # двигаем первую линию целиком — она отклеивается, вторая едет следом
+    ed.sel.set([l1])
+    ed.nudge(10, 0)
+    assert l2.mapToScene(l2.points[0]) == QPointF(410, 300)
+    # острие выноски, приклеенное к прямоугольнику
+    c = CalloutItem({"text": "К"})
+    c.setPos(400, 400)
+    ed.add_items([c])
+    ed.sel.set([c])
+    ed.set_tool("select")
+    tip = c.mapToScene(c.tip)
+    _drag(ed.tool, tip, QPointF(101, 181))
+    assert "t0" in c.glue
+    ed.sel.set([r])
+    ed.nudge(5, 0)
+    assert c.mapToScene(c.tip) == QPointF(105, 180)

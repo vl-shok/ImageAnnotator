@@ -284,6 +284,9 @@ class CalloutItem(AnnotationItem):
         super().__init__(props)
         # указатели: [точка указания (локально), начало на рамке (fx, fy) или None — авто]
         self.leaders = [[QPointF(tip) if tip is not None else QPointF(-40, 60), None]]
+        # изгиб каждого указателя: середина дуги (u, v) в системе «начало → острие»
+        # (u — вдоль, v — поперёк, в долях длины) или None — прямая
+        self.bends: list[tuple[float, float] | None] = [None]
         self._layout = None
 
     # первый указатель — для совместимости
@@ -299,7 +302,10 @@ class CalloutItem(AnnotationItem):
         out = []
         for t, st in self.leaders:
             out.append([round(t.x(), 3), round(t.y(), 3)] + ([round(st[0], 4), round(st[1], 4)] if st else []))
-        return {"tip": out[0][:2], "leaders": out}
+        d = {"tip": out[0][:2], "leaders": out}
+        if any(b is not None for b in self.bends):
+            d["bends"] = [[round(b[0], 6), round(b[1], 6)] if b is not None else None for b in self.bends]
+        return d
 
     def geom_from_dict(self, d):
         lst = d.get("leaders")
@@ -308,6 +314,9 @@ class CalloutItem(AnnotationItem):
             lst = [[t[0], t[1]]]
         self.leaders = [[QPointF(float(v[0]), float(v[1])),
                          (float(v[2]), float(v[3])) if len(v) >= 4 else None] for v in lst]
+        bends = list(d.get("bends") or [])
+        bends += [None] * (len(self.leaders) - len(bends))
+        self.bends = [(float(b[0]), float(b[1])) if b else None for b in bends[:len(self.leaders)]]
         self._layout = None
 
     def props_changed(self):
@@ -347,17 +356,71 @@ class CalloutItem(AnnotationItem):
     def anchor(self) -> QPointF | None:
         return self.start_point(0)
 
+    def bend_mid(self, i: int) -> QPointF | None:
+        """Середина i-го указателя (ручка изгиба) или None, если линии нет."""
+        a = self.start_point(i)
+        if a is None:
+            return None
+        t = self.leaders[i][0]
+        bend = self.bends[i]
+        if bend is None:
+            return QPointF((a.x() + t.x()) / 2, (a.y() + t.y()) / 2)
+        dx, dy = t.x() - a.x(), t.y() - a.y()
+        u, v = bend
+        return QPointF(a.x() + u * dx - v * dy, a.y() + u * dy + v * dx)
+
+    def leader_ctrl(self, i: int) -> QPointF | None:
+        """Контрольная точка дуги i-го указателя (None — прямая)."""
+        if self.bends[i] is None:
+            return None
+        a, m = self.start_point(i), self.bend_mid(i)
+        if a is None:
+            return None
+        t = self.leaders[i][0]
+        return QPointF(2 * m.x() - (a.x() + t.x()) / 2, 2 * m.y() - (a.y() + t.y()) / 2)
+
     def segments(self):
+        """[(начало, острие, контрольная точка или None)] — только видимые указатели."""
         out = []
         for i, (tip, _) in enumerate(self.leaders):
             a = self.start_point(i)
             if a is not None:
-                out.append((a, tip))
+                out.append((a, tip, self.leader_ctrl(i)))
         return out
+
+    def bend_leader(self, i: int, m: QPointF):
+        """Изогнуть i-й указатель так, чтобы дуга проходила через m."""
+        a = self.start_point(i)
+        if a is None:
+            return
+        t = self.leaders[i][0]
+        dx, dy = t.x() - a.x(), t.y() - a.y()
+        ln2 = dx * dx + dy * dy
+        self.prepareGeometryChange()
+        if ln2 < 1e-9 or dist(m, QPointF((a.x() + t.x()) / 2, (a.y() + t.y()) / 2)) < 0.75:
+            self.bends[i] = None   # почти прямая — считаем прямой
+        else:
+            rx, ry = m.x() - a.x(), m.y() - a.y()
+            self.bends[i] = ((rx * dx + ry * dy) / ln2, (ry * dx - rx * dy) / ln2)
+        self.update()
+
+    def is_bent(self) -> bool:
+        return any(b is not None for b in self.bends)
+
+    def straighten(self, handle_idx=None):
+        """Выпрямить указатель ручки изгиба handle_idx (None — все)."""
+        self.prepareGeometryChange()
+        n = len(self.leaders)
+        if handle_idx is not None and 2 * n <= handle_idx < 3 * n:
+            self.bends[handle_idx - 2 * n] = None
+        else:
+            self.bends = [None] * n
+        self.update()
 
     def add_leader(self, tip: QPointF, start=None):
         self.prepareGeometryChange()
         self.leaders.append([QPointF(tip), start])
+        self.bends.append(None)
         self.update()
 
     def remove_leader(self, i: int) -> bool:
@@ -365,6 +428,14 @@ class CalloutItem(AnnotationItem):
             return False
         self.prepareGeometryChange()
         del self.leaders[i]
+        del self.bends[i]
+        # приклеенные острия: номера следующих указателей сдвигаются
+        glue = {}
+        for k, g in self.glue.items():
+            j = int(k[1:])
+            if j != i:
+                glue[f"t{j - 1 if j > i else j}"] = g
+        self.glue = glue
         self.update()
         return True
 
@@ -395,17 +466,18 @@ class CalloutItem(AnnotationItem):
 
     def leader_path(self):
         p = QPainterPath()
-        for a, t in self.segments():
+        for a, t, c in self.segments():
             p.moveTo(a)
-            p.lineTo(t)
+            if c is None:
+                p.lineTo(t)
+            else:
+                p.quadTo(c, t)
         return p
 
     def outline_path(self):
         p = QPainterPath()
         p.addRect(self.box())
-        for a, t in self.segments():
-            p.moveTo(a)
-            p.lineTo(t)
+        p.addPath(self.leader_path())
         return p
 
     def hit(self, scene_pt, tol):
@@ -426,24 +498,33 @@ class CalloutItem(AnnotationItem):
     def margin(self):
         return float(self.props.get("line_width", 2)) * 6 + 12 + float(self.props.get("tip_size") or 0)
 
-    # ручки: [острие 1, начало 1, острие 2, начало 2, …, блок]
+    # ручки: [острие 1, начало 1, острие 2, начало 2, …, изгиб 1, изгиб 2, …, блок]
     def handles(self):
         hs = []
         for i, (tip, _) in enumerate(self.leaders):
             hs.append(QPointF(tip))
             a = self.start_point(i)
             hs.append(a if a is not None else QPointF(tip))
+        for i, (tip, _) in enumerate(self.leaders):
+            m = self.bend_mid(i)
+            hs.append(m if m is not None else QPointF(tip))
         hs.append(self.box().center())     # маркер перемещения блока (стрелки остаются на месте)
         return hs
 
     def handle_kinds(self):
-        return ["tip", "anchor"] * len(self.leaders) + ["move"]
+        n = len(self.leaders)
+        # у указателя без линии (острие внутри блока) ручки изгиба нет
+        bends = ["bend" if self.start_point(i) is not None else "hidden" for i in range(n)]
+        return ["tip", "anchor"] * n + bends + ["move"]
 
     def leader_index(self, idx):
-        """(номер указателя, 'tip' | 'anchor') для индекса ручки или None (блок)."""
-        if idx >= 2 * len(self.leaders):
-            return None
-        return idx // 2, ("tip" if idx % 2 == 0 else "anchor")
+        """(номер указателя, 'tip' | 'anchor' | 'bend') для индекса ручки или None (блок)."""
+        n = len(self.leaders)
+        if idx < 2 * n:
+            return idx // 2, ("tip" if idx % 2 == 0 else "anchor")
+        if idx < 3 * n:
+            return idx - 2 * n, "bend"
+        return None
 
     def handle_snap_extra(self, idx):
         li = self.leader_index(idx)
@@ -455,6 +536,8 @@ class CalloutItem(AnnotationItem):
     def handle_cursor(self, idx):
         li = self.leader_index(idx)
         if li is None:
+            return Qt.SizeAllCursor
+        if li[1] == "bend":
             return Qt.SizeAllCursor
         return Qt.CrossCursor if li[1] == "tip" else Qt.PointingHandCursor
 
@@ -469,9 +552,26 @@ class CalloutItem(AnnotationItem):
                 ld[0] = ld[0] - d
         elif li[1] == "tip":
             self.leaders[li[0]][0] = QPointF(p)
+        elif li[1] == "bend":
+            self.bend_leader(li[0], p)
         else:
             self.leaders[li[0]][1] = self._border_param(p, constrain)
         self.update()
+
+    # приклеивание: «t0», «t1», … — острия указателей
+    def glue_ends(self):
+        return {f"t{i}": QPointF(t) for i, (t, _) in enumerate(self.leaders)}
+
+    def set_glue_end(self, key, p):
+        i = int(key[1:])
+        if 0 <= i < len(self.leaders):
+            self.prepareGeometryChange()
+            self.leaders[i][0] = QPointF(p)
+            self.update()
+
+    def handle_glue_key(self, idx):
+        li = self.leader_index(idx)
+        return f"t{li[0]}" if li is not None and li[1] == "tip" else None
 
     def snap_points(self):
         return [(QPointF(t), "endpoint") for t, _ in self.leaders] + rect_snap_points(self.box())
@@ -483,9 +583,9 @@ class CalloutItem(AnnotationItem):
         box, trect, flags, font = self.layout()
         lc = self.props["line_color"]
         lw = float(self.props["line_width"])
-        for a, t in self.segments():
+        for a, t, c in self.segments():
             draw_line_with_caps(painter, [a, t], lc, lw, "solid", "none", self.props.get("tip", "arrow"),
-                                end_size=self.props.get("tip_size", 0))
+                                end_size=self.props.get("tip_size", 0), ctrl=c)
         paint_text_box(painter, self.props, box, trect, flags, font,
                        border_color=lc if self.props.get("border") else None, border_w=lw)
 
@@ -584,6 +684,19 @@ class NumberItem(AnnotationItem):
 
     def handle_cursor(self, idx):
         return Qt.SizeAllCursor if idx == 0 else Qt.CrossCursor
+
+    # приклеивание: «t» — острие указателя
+    def glue_ends(self):
+        return {"t": QPointF(self.tip)} if self.has_leader() else {}
+
+    def set_glue_end(self, key, p):
+        if key == "t" and self.tip is not None:
+            self.prepareGeometryChange()
+            self.tip = QPointF(p)
+            self.update()
+
+    def handle_glue_key(self, idx):
+        return "t" if idx == 1 and self.has_leader() else None
 
     def move_handle(self, idx, p, constrain=False, symmetric=False):
         self.prepareGeometryChange()
