@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLineEdit, QMenu, QScrollAre
 from .icons import icon
 
 ACCENT = QColor(0, 150, 255)
-CANVAS_BG = QColor(38, 40, 44)     # фон холста — активная вкладка «сливается» с ним
+CANVAS_BG = QColor(38, 40, 44)     # фон холста — активная вкладка такого же цвета
 TAB_W = 150
 TAB_H = 28
 THUMB_H = 80
@@ -155,11 +155,9 @@ class _Content(QWidget):
             tr = QRectF(self.tab_rect(r)).adjusted(0.5, 0.5, -0.5, 0)
             path = _tab_path(tr)
             p.setPen(Qt.NoPen)
+            # активная вкладка — просто темнее (как холст); синим выделяется только её миниатюра
             p.fillPath(path, CANVAS_BG if active else (tab_hover if hover else tab_bg))
-            if active:
-                p.setPen(QPen(ACCENT, 2))
-                p.drawLine(QPointF(tr.left() + 5, tr.top() + 1), QPointF(tr.right() - 5, tr.top() + 1))
-            else:
+            if not active:
                 p.setPen(QPen(line, 1))
                 p.drawPath(path)
             # имя
