@@ -9,17 +9,50 @@ import os
 import uuid
 
 from PySide6.QtCore import QMimeData, QObject, QPointF, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QTransform, QUndoStack
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QTransform, QUndoGroup, QUndoStack
 
 from . import imageops, styles
 from .commands import AddCmd, AdjustCmd, ItemImageCmd, LayersCmd, RasterCmd, RemoveCmd, StateCmd
-from .document import BG_LAYER_ID, Document, Layer
+from .document import BG_LAYER_ID, PROJECT_EXT, Document, Layer
 from .geometry import dist
 from .items import ImageItem, create_from_dict
 from .selection import SelectionManager
 from .snap import SnapManager
 
 MIME_ITEMS = "application/x-imageannotator-items"
+
+
+class Project:
+    """Открытый проект: свой документ, своя история отмены, выделение и вид холста."""
+
+    def __init__(self, editor, name: str | None = None):
+        self.doc = Document()
+        self.undo = QUndoStack(editor)
+        self.undo.setUndoLimit(300)
+        self.name = name              # имя, заданное пользователем (для несохранённого проекта)
+        self.unsaved_copy = False     # копия, которую ещё ни разу не сохраняли
+        self.sel_items: list = []
+        self.view_state = None        # (QTransform, центр) — масштаб и положение холста
+        self.thumb = None             # миниатюра (QImage) для ленты
+        self.thumb_dirty = True
+
+    def display_name(self) -> str:
+        if self.doc.project_path:
+            return os.path.splitext(os.path.basename(self.doc.project_path))[0]
+        if self.name:
+            return self.name
+        if self.doc.image_path:
+            return os.path.splitext(os.path.basename(self.doc.image_path))[0]
+        return "Без имени"
+
+    def is_modified(self) -> bool:
+        if self.doc.is_empty():
+            return False
+        return self.unsaved_copy or not self.undo.isClean()
+
+    def is_pristine(self) -> bool:
+        """Пустой нетронутый проект — его можно занять под открываемый файл."""
+        return self.doc.is_empty() and self.undo.count() == 0 and not self.name
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp")
 
 
@@ -31,15 +64,28 @@ class Editor(QObject):
     cropChanged = Signal()
     filterChanged = Signal()
     styleChanged = Signal()       # изменён стиль для новых объектов (например, толщина карандаша)
+    # сигналы текущего документа (при переключении проекта панели остаются подключены к редактору)
+    docItemsChanged = Signal()
+    docItemsModified = Signal()
+    docLayersChanged = Signal()
+    docBackgroundChanged = Signal()
+    docAdjustChanged = Signal()
+    projectsChanged = Signal()        # состав, порядок, имена, отметки «изменён»
+    projectSwitched = Signal()        # активным стал другой проект
 
     def __init__(self):
         super().__init__()
-        self.doc = Document()
+        self.undo_group = QUndoGroup(self)
+        self.projects: list[Project] = []
+        self.project: Project | None = None
+        self.view = None          # CanvasView, устанавливается окном
+        self.tool = None
+        first = self._make_project()
+        self.projects.append(first)
+        self.project, self.doc, self.undo = first, first.doc, first.undo
+        self.undo_group.setActiveStack(self.undo)
         self.sel = SelectionManager(self.doc)
         self.snap = SnapManager()
-        self.undo = QUndoStack(self)
-        self.undo.setUndoLimit(300)
-        self.view = None          # CanvasView, устанавливается окном
         self.tools = {}
         self.tool = None
         self.session = 0          # для слияния последовательных правок свойства
@@ -47,7 +93,152 @@ class Editor(QObject):
         self.ask_text = lambda initial, title="Текст": None  # переопределяется UI
         self.paste_offset = 0
         self.sel.changed.connect(self.bump_session)
-        self.doc.backgroundChanged.connect(self._update_style_scale)
+        self.docItemsChanged.connect(self.sel.prune)
+        self.docBackgroundChanged.connect(self._update_style_scale)
+        self.undo_group.cleanChanged.connect(lambda *_: self.projectsChanged.emit())
+
+    # ================================================================ projects
+    def _make_project(self, name=None) -> Project:
+        p = Project(self, name)
+        self.undo_group.addStack(p.undo)
+        d = p.doc
+        for sig, fwd in ((d.itemsChanged, self.docItemsChanged), (d.itemsModified, self.docItemsModified),
+                         (d.layersChanged, self.docLayersChanged), (d.backgroundChanged, self.docBackgroundChanged),
+                         (d.adjustChanged, self.docAdjustChanged)):
+            sig.connect((lambda doc, f: (lambda *_: f.emit() if doc is self.doc else None))(d, fwd))
+        for sig in (d.itemsChanged, d.itemsModified, d.backgroundChanged, d.layersChanged, d.adjustChanged):
+            sig.connect((lambda pr: (lambda *_: setattr(pr, "thumb_dirty", True)))(p))
+        return p
+
+    def new_project(self, index=None, name=None, switch=True) -> Project:
+        p = self._make_project(name)
+        self.projects.insert(len(self.projects) if index is None else index, p)
+        if switch:
+            self.switch_project(p)
+        self.projectsChanged.emit()
+        return p
+
+    def project_for_open(self) -> Project:
+        """Куда открыть файл: текущий пустой проект или новый (справа от текущего)."""
+        if self.project is not None and self.project.is_pristine():
+            return self.project
+        return self.new_project(self.projects.index(self.project) + 1)
+
+    def find_project(self, path) -> Project | None:
+        """Уже открытый проект с этим файлом (.iap или фото без проекта)."""
+        key = os.path.normcase(os.path.abspath(path))
+        for p in self.projects:
+            f = p.doc.project_path or (None if p.unsaved_copy or p.name else p.doc.image_path)
+            if f and os.path.normcase(os.path.abspath(f)) == key:
+                return p
+        return None
+
+    def switch_project(self, p: Project):
+        if p is self.project or p not in self.projects:
+            return
+        old = self.project
+        if self.tool is not None:
+            self.tool.cancel()
+        self.set_raster_selection(None)
+        if old is not None and self.view is not None:
+            old.view_state = self.view.view_state()
+        if old is not None:
+            old.sel_items = list(self.sel.items)
+        self.project, self.doc, self.undo = p, p.doc, p.undo
+        self.undo_group.setActiveStack(p.undo)
+        self.session += 1
+        if self.view is not None:
+            self.view.set_document(p.doc, p.view_state)
+        self.sel.set_doc(p.doc, p.sel_items)
+        self._update_style_scale()
+        self.projectSwitched.emit()
+        for f in (self.docBackgroundChanged, self.docLayersChanged, self.docItemsChanged, self.docAdjustChanged):
+            f.emit()
+        self.projectsChanged.emit()
+
+    def close_project(self, p: Project):
+        """Закрыть проект (без вопросов — спрашивает окно). Последний заменяется пустым."""
+        if p not in self.projects:
+            return
+        if p is self.project:
+            i = self.projects.index(p)
+            others = [q for q in self.projects if q is not p]
+            if others:
+                nxt = others[min(i, len(others) - 1)]
+            else:
+                nxt = self._make_project()
+                self.projects.append(nxt)
+            self.switch_project(nxt)
+        self.projects.remove(p)
+        self.undo_group.removeStack(p.undo)
+        self.projectsChanged.emit()
+
+    def move_project(self, p: Project, index: int):
+        if p not in self.projects:
+            return
+        self.projects.remove(p)
+        self.projects.insert(max(0, min(index, len(self.projects))), p)
+        self.projectsChanged.emit()
+
+    def unique_name(self, base: str) -> str:
+        names = {q.display_name().lower() for q in self.projects}
+        if base.lower() not in names:
+            return base
+        k = 2
+        while f"{base} {k}".lower() in names:
+            k += 1
+        return f"{base} {k}"
+
+    def duplicate_project(self, p: Project | None = None) -> Project:
+        """Копия проекта — новый несохранённый проект справа от исходного."""
+        p = p or self.project
+        q = self._make_project(self.unique_name(f"{p.display_name()} (копия)"))
+        q.doc.load_dict(p.doc.to_dict())
+        q.doc.project_path = None
+        q.doc.image_path = p.doc.image_path
+        q.unsaved_copy = True
+        q.view_state = self.view.view_state() if (self.view is not None and p is self.project) else p.view_state
+        self.projects.insert(self.projects.index(p) + 1, q)
+        self.switch_project(q)
+        self.projectsChanged.emit()
+        return q
+
+    def rename_project(self, p: Project, new_name: str) -> str | None:
+        """Переименовать проект; у сохранённого переименовывается и файл .iap.
+        Возвращает текст ошибки или None."""
+        new_name = (new_name or "").strip()
+        if not new_name or any(c in '<>:"/\\|?*' for c in new_name):
+            return "Недопустимое имя"
+        if new_name == p.display_name():
+            return None
+        old = p.doc.project_path
+        if old:
+            new = os.path.join(os.path.dirname(old), new_name + PROJECT_EXT)
+            if os.path.normcase(new) != os.path.normcase(old) and os.path.exists(new):
+                return f"Файл уже существует:\n{new}"
+            try:
+                os.replace(old, new)
+            except OSError as e:
+                return f"Не удалось переименовать файл:\n{e}"
+            p.doc.project_path = new
+            p.name = None
+        else:
+            p.name = new_name
+        self.projectsChanged.emit()
+        return None
+
+    def quick_png_path(self, p: Project | None = None) -> str | None:
+        """Быстрый PNG: имя как в ленте, рядом с проектом (иначе — рядом с фото).
+        Исходное фото не перезаписывается никогда. None — некуда (нет ни проекта, ни фото на диске)."""
+        p = p or self.project
+        d = p.doc
+        folder = os.path.dirname(d.project_path or d.image_path or "")
+        if not folder:
+            return None
+        path = os.path.join(folder, p.display_name() + ".png")
+        if d.image_path and os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(d.image_path)):
+            path = os.path.join(folder, p.display_name() + "_annotated.png")
+        return path
 
     def _update_style_scale(self):
         bg = self.doc.background
@@ -566,7 +757,7 @@ class Editor(QObject):
             self.doc.relayer()
         self.change_layers(fn, "Слой", merge_key=("layer", lid, attr, self.session) if merge else None)
         if attr in ("visible", "locked"):
-            self.sel._prune()
+            self.sel.prune()
             if attr == "locked" and value:
                 self.sel.set([i for i in self.sel.items if i.layer_id != lid])
 
@@ -580,7 +771,7 @@ class Editor(QObject):
                 l.visible = True if only else (l.id == lid)
             self.doc.relayer()
         self.change_layers(fn, "Видимость слоёв")
-        self.sel._prune()
+        self.sel.prune()
 
     def move_layer(self, lid, delta):
         idx = self.doc.layer_index(lid)
@@ -686,7 +877,10 @@ class Editor(QObject):
             json.dump(data, f, ensure_ascii=False)
         os.replace(tmp, path)
         self.doc.project_path = path
+        self.project.unsaved_copy = False
+        self.project.name = None
         self.undo.setClean()
+        self.projectsChanged.emit()
 
     def insert_image(self, img: QImage, at: QPointF | None = None):
         if img is None or img.isNull():

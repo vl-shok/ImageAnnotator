@@ -46,9 +46,8 @@ class Document(QObject):
 
     def __init__(self):
         super().__init__()
-        from .items.magnifier import MagnifierItem
-        MagnifierItem.source_provider = staticmethod(lambda: self.display_image)
         self.scene = QGraphicsScene()
+        self.scene.ia_doc = self          # документ сцены (лупа берёт из него фото)
         self.scene.setItemIndexMethod(QGraphicsScene.NoIndex)
         self.bg_item = BackgroundItem()
         self.scene.addItem(self.bg_item)

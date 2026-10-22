@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QGuiApplication, QColor, QFont, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QPainter, QPen, QPixmap, QPolygonF, QTransform
 from PySide6.QtWidgets import QFrame, QGraphicsView
 
 from .geometry import dist
@@ -142,8 +142,8 @@ class CanvasView(QGraphicsView):
         editor.rasterSelectionChanged.connect(self._bar_timer.start)
         editor.sel.changed.connect(self.viewport().update)
         editor.sel.changed.connect(self._bar_timer.start)
-        editor.doc.itemsModified.connect(self.viewport().update)
-        editor.doc.itemsChanged.connect(self._on_items_changed)
+        editor.docItemsModified.connect(self.viewport().update)
+        editor.docItemsChanged.connect(self._on_items_changed)
 
     # ================================================================ geometry helpers
     def scale_factor(self) -> float:
@@ -261,6 +261,28 @@ class CanvasView(QGraphicsView):
         items_base.set_view_scale(k)
         self.centerOn(r.center())
         self.zoomChanged.emit(k)
+
+    def view_state(self):
+        """Масштаб и положение холста (запоминается для каждого проекта)."""
+        return QTransform(self.transform()), self.visible_center()
+
+    def set_document(self, doc, state=None):
+        """Показать документ другого проекта; state — сохранённый вид (None — вписать)."""
+        self.hover_item = None
+        self.hover_handle = None
+        self.snap_hit = None
+        self.snap_target = None
+        self.rubber = None
+        self.setScene(doc.scene)
+        if state is None:
+            self.fit()
+            return
+        tf, center = state
+        self.setTransform(tf)
+        items_base.set_view_scale(self.scale_factor())
+        self.centerOn(center)
+        self.zoomChanged.emit(self.scale_factor())
+        self.viewport().update()
 
     def actual_size(self):
         c = self.mapToScene(self.viewport().rect().center())

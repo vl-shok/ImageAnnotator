@@ -1412,3 +1412,120 @@ def test_ctrl_enter_finishes_text_editing(ed):
     assert ed.sel.items == [t]
     ed.release_focus()
     assert ed.sel.items == []
+
+
+def _photo(tmp_path, name, color=(200, 60, 60)):
+    img = QImage(400, 300, QImage.Format_RGB32)
+    img.fill(QColor(*color))
+    path = str(tmp_path / name)
+    img.save(path)
+    return path
+
+
+def test_projects_independent_undo_selection_duplicate(ed, tmp_path):
+    import os
+    a = ed.project
+    ed.add_items([line((0, 0), (100, 0))])
+    la = ed.doc.items()[0]
+    b = ed.new_project()
+    ed.new_from_image(QImage(_photo(tmp_path, "b.png")), str(tmp_path / "b.png"))
+    lb = line((10, 10), (50, 50))
+    ed.add_items([lb])
+    assert ed.project is b and ed.doc is b.doc and ed.undo is b.undo
+    # своя история: отмена в b не трогает a
+    ed.undo.undo()
+    assert not b.doc.contains(lb) and a.doc.contains(la)
+    ed.undo.redo()
+    # своё выделение, возвращается при переключении
+    ed.sel.set([lb])
+    ed.switch_project(a)
+    assert ed.sel.items == [] or ed.sel.items == [la]
+    ed.sel.set([la])
+    ed.switch_project(b)
+    assert ed.sel.items == [lb]
+    # копия — независимый несохранённый проект справа
+    c = ed.duplicate_project(b)
+    assert ed.projects.index(c) == ed.projects.index(b) + 1 and ed.project is c
+    assert c.display_name() == "b (копия)" and c.is_modified() and c.doc.project_path is None
+    assert len(c.doc.items()) == len(b.doc.items())
+    c.doc.items()[0].moveBy(100, 0)
+    assert lb.pos() != c.doc.items()[0].pos()
+    assert ed.duplicate_project(b).display_name() == "b (копия) 2"
+    # порядок и закрытие; последний закрытый — заменяется пустым
+    ed.move_project(c, 0)
+    assert ed.projects[0] is c
+    for p in list(ed.projects):
+        ed.close_project(p)
+    assert len(ed.projects) == 1 and ed.project.is_pristine()
+    del os
+
+
+def test_project_rename_and_quick_png_path(ed, tmp_path):
+    import os
+    photo = _photo(tmp_path, "achh.png")
+    ed.project_for_open()
+    ed.open_image(photo)
+    p = ed.project
+    assert p.display_name() == "achh"
+    # PNG рядом с фото, но не поверх самого фото
+    assert ed.quick_png_path(p) == os.path.join(str(tmp_path), "achh_annotated.png")
+    # несохранённый — меняется имя (и имя PNG)
+    assert ed.rename_project(p, "C12 220n") is None
+    assert p.display_name() == "C12 220n"
+    assert ed.quick_png_path(p) == os.path.join(str(tmp_path), "C12 220n.png")
+    assert ed.rename_project(p, "bad/name") is not None
+    # сохранённый — переименовывается и файл .iap
+    prj = str(tmp_path / "C12 220n.iap")
+    ed.save_project(prj)
+    assert ed.rename_project(p, "C12 330n") is None
+    assert not os.path.exists(prj) and os.path.exists(str(tmp_path / "C12 330n.iap"))
+    assert p.doc.project_path.endswith("C12 330n.iap") and p.display_name() == "C12 330n"
+    # повторное открытие того же файла находит этот проект
+    assert ed.find_project(str(tmp_path / "C12 330n.iap")) is p
+    # проект без файла и без фото — PNG некуда положить без вопроса
+    q = ed.new_project()
+    ed.new_blank(100, 100, QColor("white"))
+    assert ed.quick_png_path(q) is None
+
+
+def test_project_strip_wheel_and_overlay(tmp_path, monkeypatch):
+    from PySide6.QtCore import QPoint, QSettings, Qt
+    from PySide6.QtGui import QWheelEvent
+    from annotator import mainwindow, styles
+    # настройки окна — во временный файл, не в реестр пользователя
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
+    styles.reset()
+    w = mainwindow.MainWindow()
+    w.resize(1000, 700)
+    w.show()
+    w.strip.set_pinned(False)
+    w.open_paths([_photo(tmp_path, f"p{i}.png", (40 * i, 100, 150)) for i in range(4)])
+    ed = w.ed
+    # открыли несколько — активный первый (левый) из них
+    assert len(ed.projects) == 4 and ed.project is ed.projects[0]
+    cont = w.strip.content
+
+    def wheel(dy):
+        QApplication.sendEvent(cont, QWheelEvent(QPointF(10, 10), QPointF(10, 10), QPoint(), QPoint(0, dy),
+                                                 Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+    wheel(120)                        # колесо от себя — следующий справа
+    assert ed.project is ed.projects[1]
+    wheel(-120)
+    wheel(-120)                       # на первом — дальше не листает
+    assert ed.project is ed.projects[0]
+    # лента — над холстом; миниатюры без закрепления — поверх холста (холст не меняет размер)
+    QApplication.processEvents()
+    assert w.strip.y() == 0 and w.view.y() == w.strip.collapsed_height()
+    vh = w.view.height()
+    w.strip._hover = True
+    w.strip.relayout()
+    QApplication.processEvents()
+    assert w.view.height() == vh and w.strip.height() > w.strip.collapsed_height()
+    # закреплённая — место под холстом
+    w.strip.set_pinned(True)
+    QApplication.processEvents()
+    assert w.view.height() < vh
+    for p in ed.projects:
+        p.undo.setClean()
+    w.close()

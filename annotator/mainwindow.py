@@ -19,6 +19,7 @@ from .ui import widgets
 from .ui.dialogs import NewDialog, ask_text
 from .ui.icons import app_icon, icon
 from .ui.layers_panel import LayersPanel
+from .ui.project_strip import ProjectStrip
 from .ui.properties import PropertiesPanel
 
 APP_NAME = "ImageAnnotator"
@@ -54,6 +55,10 @@ HOTKEYS = [
     ("Двойной клик / ПКМ по вершине", "Удалить вершину (или Alt+клик)"), ("Ctrl+M", "Коррекция цвета"),
     ("Ctrl+R / Ctrl+Shift+R", "Повернуть холст на 90° по / против часовой"),
     ("Ctrl+Enter (в тексте)", "Готово и снять выделение — фокус на холст"),
+    ("Проекты", ""),
+    ("Ctrl+Tab / Ctrl+Shift+Tab", "Следующий / предыдущий проект (и Ctrl+PgDown / Ctrl+PgUp, колесо над лентой)"),
+    ("Ctrl+Shift+D", "Дублировать проект"), ("Ctrl+W", "Закрыть проект"),
+    ("Ctrl+Alt+S", "Сохранить все проекты"), ("Ctrl+Shift+E", "Быстрый PNG (имя как в ленте)"),
     ("Ctrl+Alt+G", "Менеджер групп"), ("Shift+S", "Привязка вкл/выкл"),
     ("Ctrl+D", "Дублировать"), ("Ctrl+G / Ctrl+Shift+G", "Группировать / разгруппировать"),
     ("Выноска: Ctrl+тянуть от рамки", "Новая стрелка; ромб — начало, круг — сдвинуть блок, двойной клик по острию — удалить"),
@@ -61,6 +66,28 @@ HOTKEYS = [
     ("Ctrl+Shift+C", "Копировать результат как картинку"),
     ("Ctrl+E", "Экспорт PNG/JPG/PDF"),
 ]
+
+
+class CanvasArea(QWidget):
+    """Лента проектов сверху и холст под ней. Миниатюры незакреплённой ленты выезжают поверх холста."""
+
+    def __init__(self, view, strip):
+        super().__init__()
+        self.view, self.strip = view, strip
+        view.setParent(self)
+        strip.setParent(self)
+        strip.heightChanged.connect(self._place)
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._place()
+
+    def _place(self):
+        w, h = self.width(), self.height()
+        top = min(h, self.strip.reserved_height())
+        self.view.setGeometry(0, top, w, max(0, h - top))
+        self.strip.setGeometry(0, 0, w, min(h, self.strip.current_height()))
+        self.strip.raise_()
 
 
 class MainWindow(QMainWindow):
@@ -72,7 +99,8 @@ class MainWindow(QMainWindow):
         self.ed.ask_text = lambda initial="", title="Текст": ask_text(self, initial, title,
                                                                      on_release=self.ed.release_focus)
         self.view = CanvasView(self.ed)
-        self.setCentralWidget(self.view)
+        self.strip = ProjectStrip(self.ed, self)
+        self.setCentralWidget(CanvasArea(self.view, self.strip))
         for t in make_tools(self.ed):
             self.ed.register_tool(t)
         self.acts: dict[str, QAction] = {}
@@ -116,17 +144,27 @@ class MainWindow(QMainWindow):
         A("save", "Сохранить проект", self.save, "Ctrl+S", "save")
         A("saveas", "Сохранить проект как…", self.save_as, "Ctrl+Shift+S")
         A("export", "Экспорт PNG / JPG / PDF…", self.export_dialog, "Ctrl+E", "export")
-        A("export_quick", "Быстрый экспорт PNG рядом с фото", self.export_quick, "Ctrl+Shift+E")
+        A("export_quick", "Быстрый PNG (имя как в ленте, рядом с проектом)", self.export_quick, "Ctrl+Shift+E")
+        A("png_all", "Быстрый PNG всех проектов", self.quick_png_all)
+        A("save_all", "Сохранить все проекты", self.save_all, "Ctrl+Alt+S")
+        A("project_dup", "Дублировать проект", lambda: self.duplicate(self.ed.project), "Ctrl+Shift+D",
+          tip="Копия проекта открывается рядом как новый проект")
+        A("project_close", "Закрыть проект", lambda: self.close_project(self.ed.project), "Ctrl+W")
+        A("project_next", "Следующий проект", lambda: self.step_project(1, wrap=True), ["Ctrl+Tab", "Ctrl+PgDown"])
+        A("project_prev", "Предыдущий проект", lambda: self.step_project(-1, wrap=True),
+          ["Ctrl+Shift+Tab", "Ctrl+PgUp"])
+        A("strip_pin", "Закрепить ленту проектов", lambda: self.strip.set_pinned(self.acts["strip_pin"].isChecked()),
+          checkable=True)
         A("copy_result", "Копировать результат как картинку", self.copy_result, "Ctrl+Shift+C", "copy",
           tip="Копировать всё изображение с пометками в буфер (PNG) — вставить в письмо/мессенджер")
         A("print", "Печать…", lambda: export.print_doc(ed.doc, self), "Ctrl+P")
         A("quit", "Выход", self.close, "Ctrl+Q")
 
-        self.acts["undo"] = a = ed.undo.createUndoAction(self, "Отменить")
+        self.acts["undo"] = a = ed.undo_group.createUndoAction(self, "Отменить")
         a.setShortcuts([QKeySequence("Ctrl+Z")])
         a.setIcon(icon("undo"))
         self.addAction(a)
-        self.acts["redo"] = a = ed.undo.createRedoAction(self, "Повторить")
+        self.acts["redo"] = a = ed.undo_group.createRedoAction(self, "Повторить")
         a.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
         a.setIcon(icon("redo"))
         self.addAction(a)
@@ -196,10 +234,13 @@ class MainWindow(QMainWindow):
         self.recent_menu = m.addMenu("Последние файлы")
         self.recent_menu.aboutToShow.connect(self._fill_recent)
         m.addSeparator()
-        for k in ("save", "saveas"):
+        for k in ("save", "saveas", "save_all"):
             m.addAction(a[k])
         m.addSeparator()
-        for k in ("export", "export_quick", "copy_result", "print"):
+        for k in ("export", "export_quick", "png_all", "copy_result", "print"):
+            m.addAction(a[k])
+        m.addSeparator()
+        for k in ("project_dup", "project_close", "project_next", "project_prev"):
             m.addAction(a[k])
         m.addSeparator()
         m.addAction(a["quit"])
@@ -210,7 +251,7 @@ class MainWindow(QMainWindow):
             m.addSeparator() if k is None else m.addAction(a[k])
 
         m = mb.addMenu("&Вид")
-        for k in ("fit", "actual", "zoom_in", "zoom_out", None, "snap"):
+        for k in ("fit", "actual", "zoom_in", "zoom_out", None, "snap", None, "strip_pin"):
             m.addSeparator() if k is None else m.addAction(a[k])
         self.view_menu = m
 
@@ -320,12 +361,15 @@ class MainWindow(QMainWindow):
         ed = self.ed
         ed.toolChanged.connect(self._on_tool)
         ed.message.connect(lambda m: self.statusBar().showMessage(m, 3000))
-        ed.undo.cleanChanged.connect(lambda *_: self._update_title())
-        ed.undo.indexChanged.connect(lambda *_: self._update_title())
+        ed.undo_group.cleanChanged.connect(lambda *_: self._update_title())
+        ed.undo_group.indexChanged.connect(lambda *_: self._update_title())
+        ed.projectsChanged.connect(self._update_title)
+        ed.projectSwitched.connect(self._update_size)
+        self.strip.pinnedChanged.connect(self.acts["strip_pin"].setChecked)
         ed.sel.changed.connect(self._update_actions)
         ed.rasterSelectionChanged.connect(self._update_actions)
-        ed.doc.backgroundChanged.connect(self._update_size)
-        ed.doc.backgroundChanged.connect(self._update_actions)
+        ed.docBackgroundChanged.connect(self._update_size)
+        ed.docBackgroundChanged.connect(self._update_actions)
         ed.snapChanged.connect(lambda: self.acts["snap"].setChecked(ed.snap.enabled))
         self.view.cursorMoved.connect(lambda p: self.pos_lbl.setText(f"X {p.x():.0f}  Y {p.y():.0f}"))
         self.view.zoomChanged.connect(lambda z: self.zoom_lbl.setText(f"{z * 100:.0f}%"))
@@ -368,12 +412,16 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     def _update_title(self):
-        doc = self.ed.doc
-        name = os.path.basename(doc.project_path or doc.image_path or "") or "Без имени"
         try:
-            dirty = "*" if not self.ed.undo.isClean() else ""
+            pr = self.ed.project
+            name = pr.display_name()
+            dirty = "*" if pr.is_modified() else ""
         except RuntimeError:  # при закрытии приложения
             return
+        n = len(self.ed.projects)
+        if n > 1:
+            name += f"{dirty}  [{self.ed.projects.index(pr) + 1}/{n}]"
+            dirty = ""
         self.setWindowTitle(f"{name}{dirty} — {APP_NAME}")
 
     def toggle_snap(self):
@@ -382,10 +430,13 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Привязка " + ("включена" if self.ed.snap.enabled else "выключена"), 2000)
 
     # ================================================================ files
-    def maybe_save(self) -> bool:
-        if self.ed.undo.isClean() or self.ed.doc.is_empty():
+    def maybe_save(self, proj=None) -> bool:
+        """Спросить о несохранённых изменениях проекта (по умолчанию — текущего)."""
+        proj = proj or self.ed.project
+        if not proj.is_modified():
             return True
-        r = QMessageBox.question(self, APP_NAME, "Сохранить изменения в проекте?",
+        self.ed.switch_project(proj)
+        r = QMessageBox.question(self, APP_NAME, f"Сохранить изменения в проекте «{proj.display_name()}»?",
                                  QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)
         if r == QMessageBox.Save:
             return self.save()
@@ -395,25 +446,44 @@ class MainWindow(QMainWindow):
         return self.settings.value("last_dir", os.path.expanduser("~"))
 
     def open_dialog(self):
-        if not self.maybe_save():
-            return
-        path, _ = QFileDialog.getOpenFileName(
+        paths, _ = QFileDialog.getOpenFileNames(
             self, "Открыть", self._last_dir(),
             f"Фото и проекты (*{PROJECT_EXT} *.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp);;{IMG_FILTER};;{PRJ_FILTER};;Все файлы (*)")
-        if path:
-            self.open_path(path)
+        self.open_paths(paths)
+
+    def open_paths(self, paths):
+        """Открыть файлы — каждый своим проектом (уже открытый — просто перейти к нему).
+        Активным становится первый (левый) из открытых."""
+        first = None
+        for path in paths:
+            if path.lower().endswith((PROJECT_EXT,) + IMAGE_EXTS) and self.open_path(path) and first is None:
+                first = self.ed.project
+        if first is not None:
+            self.ed.switch_project(first)
 
     def open_path(self, path) -> bool:
+        """Открыть фото или проект новым проектом (или в пустой текущий)."""
+        same = self.ed.find_project(path)
+        if same is not None:
+            self.ed.switch_project(same)
+            return True
+        created = not self.ed.project.is_pristine()
+        proj = self.ed.project_for_open()
         try:
             if path.lower().endswith(PROJECT_EXT):
                 self.ed.open_project(path)
             else:
                 if not self.ed.open_image(path):
                     QMessageBox.warning(self, APP_NAME, f"Не удалось открыть изображение:\n{path}")
+                    if created:
+                        self.ed.close_project(proj)
                     return False
         except Exception as e:  # noqa
             QMessageBox.critical(self, APP_NAME, f"Ошибка открытия файла:\n{e}")
+            if created:
+                self.ed.close_project(proj)
             return False
+        self.ed.projectsChanged.emit()
         self.settings.setValue("last_dir", os.path.dirname(path))
         self._add_recent(path)
         self._update_title()
@@ -422,11 +492,11 @@ class MainWindow(QMainWindow):
         return True
 
     def new_blank(self):
-        if not self.maybe_save():
-            return
         d = NewDialog(self)
         if d.exec() == QDialog.Accepted:
+            self.ed.project_for_open()
             self.ed.new_blank(d.w.value(), d.h.value(), QColor(d.color._color or "#ffffff"))
+            self.ed.projectsChanged.emit()
             self._update_title()
 
     def save(self) -> bool:
@@ -446,9 +516,8 @@ class MainWindow(QMainWindow):
     def _default_base(self):
         doc = self.ed.doc
         src = doc.project_path or doc.image_path
-        if src:
-            return os.path.splitext(src)[0]
-        return os.path.join(self._last_dir(), "annotated")
+        folder = os.path.dirname(src) if src else self._last_dir()
+        return os.path.join(folder, self.ed.project.display_name())
 
     def save_as(self) -> bool:
         path, _ = QFileDialog.getSaveFileName(self, "Сохранить проект", self._default_base() + PROJECT_EXT, PRJ_FILTER)
@@ -488,13 +557,107 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, f"Не удалось экспортировать:\n{path}")
 
     def export_quick(self):
-        if self.ed.doc.export_rect().isEmpty():
+        self.quick_png(self.ed.project)
+
+    # ================================================================ проекты (лента)
+    def switch_to(self, proj):
+        self.ed.switch_project(proj)
+
+    def step_project(self, d: int, wrap=False):
+        ps = self.ed.projects
+        i = ps.index(self.ed.project) + d
+        if wrap:
+            i %= len(ps)
+        elif not 0 <= i < len(ps):
             return
-        base = self._default_base()
-        if base.endswith("_annotated"):
-            base = base[: -len("_annotated")]
-        path = base + "_annotated.png"
-        self._do_export(path)
+        self.ed.switch_project(ps[i])
+
+    def rename(self, proj, name):
+        err = self.ed.rename_project(proj, name)
+        if err:
+            QMessageBox.warning(self, APP_NAME, err)
+        self._update_title()
+
+    def duplicate(self, proj):
+        if proj.doc.is_empty():
+            return
+        self.ed.duplicate_project(proj)
+        self.statusBar().showMessage("Создана копия проекта — правьте её, исходный проект не меняется", 4000)
+
+    def close_project(self, proj) -> bool:
+        if not self.maybe_save(proj):
+            return False
+        self.ed.close_project(proj)
+        return True
+
+    def close_others(self, proj):
+        for q in [q for q in self.ed.projects if q is not proj]:
+            if not self.close_project(q):
+                return
+        self.ed.switch_project(proj)
+
+    def close_right(self, proj):
+        i = self.ed.projects.index(proj)
+        for q in list(self.ed.projects[i + 1:]):
+            if not self.close_project(q):
+                return
+        self.ed.switch_project(proj)
+
+    def save_project(self, proj) -> bool:
+        self.ed.switch_project(proj)
+        return self.save()
+
+    def save_project_as(self, proj) -> bool:
+        self.ed.switch_project(proj)
+        return self.save_as()
+
+    def save_all(self):
+        cur = self.ed.project
+        n = 0
+        for q in list(self.ed.projects):
+            if q.is_modified():
+                if not self.save_project(q):
+                    break
+                n += 1
+        if cur in self.ed.projects:
+            self.ed.switch_project(cur)
+        self.statusBar().showMessage(f"Сохранено проектов: {n}", 3000)
+
+    def reveal(self, proj):
+        path = proj.doc.project_path or proj.doc.image_path
+        if path and os.path.exists(path):
+            import subprocess
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+
+    def quick_png(self, proj, folder=None) -> str | None:
+        """PNG с именем как в ленте рядом с проектом (иначе — рядом с фото); перезаписывается без вопросов."""
+        if proj.doc.export_rect().isEmpty():
+            return None
+        path = self.ed.quick_png_path(proj)
+        if path is None:
+            if folder is None:
+                folder = QFileDialog.getExistingDirectory(
+                    self, f"Куда сохранить PNG «{proj.display_name()}»", self._last_dir())
+                if not folder:
+                    return None
+            path = os.path.join(folder, proj.display_name() + ".png")
+        if export.export_file(proj.doc, path):
+            self.statusBar().showMessage(f"PNG: {path}", 5000)
+            return path
+        QMessageBox.warning(self, APP_NAME, f"Не удалось сохранить PNG:\n{path}")
+        return None
+
+    def quick_png_all(self):
+        """Быстрый PNG всех открытых проектов. Для несохранённых (без файла на диске) — одна папка на всех."""
+        todo = [q for q in self.ed.projects if not q.doc.export_rect().isEmpty()]
+        folder = None
+        if any(self.ed.quick_png_path(q) is None for q in todo):
+            folder = QFileDialog.getExistingDirectory(self, "Куда сохранить PNG несохранённых проектов",
+                                                      self._last_dir())
+            if not folder:
+                todo = [q for q in todo if self.ed.quick_png_path(q) is not None]
+        done = [p for p in (self.quick_png(q, folder) for q in todo) if p]
+        self.statusBar().showMessage(f"Сохранено PNG: {len(done)} из {len(todo)}", 5000)
 
     def copy_result(self):
         img = export.render_image(self.ed.doc)
@@ -529,8 +692,7 @@ class MainWindow(QMainWindow):
         p = paths[0]
         low = p.lower()
         if low.endswith(PROJECT_EXT) or (self.ed.doc.background is None and low.endswith(IMAGE_EXTS)):
-            if self.maybe_save():
-                self.open_path(p)
+            self.open_paths(paths)
             return
         for q in paths:
             if q.lower().endswith(IMAGE_EXTS):
@@ -764,6 +926,7 @@ class MainWindow(QMainWindow):
         sn.enabled = s.value("snap_enabled", True, type=bool)
         sn.radius_px = int(s.value("snap_radius", 10))
         sn.guides = s.value("snap_guides", True, type=bool)
+        self.strip.set_pinned(s.value("strip_pinned", False, type=bool))
         kinds = s.value("snap_kinds", None, type=list)
         if kinds:
             sn.kinds = set(kinds)
@@ -784,11 +947,13 @@ class MainWindow(QMainWindow):
         s.setValue("snap_radius", self.ed.snap.radius_px)
         s.setValue("snap_guides", self.ed.snap.guides)
         s.setValue("snap_kinds", sorted(self.ed.snap.kinds))
+        s.setValue("strip_pinned", self.strip.pinned)
 
     def closeEvent(self, ev):
-        if not self.maybe_save():
-            ev.ignore()
-            return
+        for q in list(self.ed.projects):
+            if not self.maybe_save(q):
+                ev.ignore()
+                return
         self._save_settings()
         ev.accept()
 

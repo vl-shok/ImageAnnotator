@@ -68,11 +68,12 @@ class PropertiesPanel(QScrollArea):
         self._hist_timer.timeout.connect(self._update_hist)
         editor.sel.changed.connect(self.rebuild)
         editor.toolChanged.connect(lambda *_: self.rebuild() if not editor.sel.items else None)
-        editor.doc.itemsModified.connect(self._refresh_timer.start)
-        editor.doc.itemsChanged.connect(self._refresh_timer.start)
-        editor.doc.layersChanged.connect(self._refresh_layers)
-        editor.doc.backgroundChanged.connect(self._on_bg)
-        editor.doc.adjustChanged.connect(self._refresh_adjust)
+        editor.docItemsModified.connect(self._refresh_timer.start)
+        editor.docItemsChanged.connect(self._refresh_timer.start)
+        editor.docLayersChanged.connect(self._refresh_layers)
+        editor.docBackgroundChanged.connect(self._on_bg)
+        editor.docAdjustChanged.connect(self._refresh_adjust)
+        editor.projectSwitched.connect(self.rebuild)
         editor.snapChanged.connect(self._refresh_snap)
         editor.cropChanged.connect(self.update_crop_info)
         self.rebuild()
@@ -336,7 +337,7 @@ class PropertiesPanel(QScrollArea):
         if doc.background is None:
             self._doc_info.setText("Нет изображения")
             return
-        name = os.path.basename(doc.project_path or doc.image_path or "") or "без имени"
+        name = self.ed.project.display_name()   # как на вкладке проекта
         self._doc_info.setText(f"{name}\n{doc.background.width()} × {doc.background.height()} px, "
                                f"объектов: {len(doc.items())}")
 

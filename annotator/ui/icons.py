@@ -262,6 +262,12 @@ def _draw(name, p: QPainter):
         p.drawLine(QPointF(32, 8), QPointF(32, 40))
         p.drawPolyline(QPolygonF([QPointF(20, 28), QPointF(32, 40), QPointF(44, 28)]))
         p.drawLine(QPointF(10, 52), QPointF(54, 52))
+    elif name == "pin":
+        # кнопка-кнопка: головка, игла
+        p.setBrush(FG)
+        p.drawPolygon(QPolygonF([QPointF(24, 10), QPointF(40, 10), QPointF(37, 28), QPointF(27, 28)]))
+        p.drawRect(QRectF(18, 28, 28, 6))
+        p.drawLine(QPointF(32, 34), QPointF(32, 56))
     elif name == "snap":
         p.drawLine(QPointF(10, 54), QPointF(40, 24))
         p.setPen(_pen(QColor(255, 210, 0), 4))

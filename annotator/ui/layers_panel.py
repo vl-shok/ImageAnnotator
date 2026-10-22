@@ -84,7 +84,6 @@ class LayersPanel(QWidget):
     def __init__(self, editor, parent=None):
         super().__init__(parent)
         self.ed = editor
-        self.doc = editor.doc
         self._updating = False
         self._collapsed: set[str] = set()
         self._thumbs: dict[str, QIcon] = {}
@@ -146,12 +145,23 @@ class LayersPanel(QWidget):
         self._thumb_timer.setInterval(350)
         self._thumb_timer.timeout.connect(self._update_thumbs)
 
-        self.doc.layersChanged.connect(self._timer.start)
-        self.doc.itemsChanged.connect(self._timer.start)
-        self.doc.itemsModified.connect(self._thumb_timer.start)
-        self.doc.backgroundChanged.connect(self._thumb_timer.start)
+        self.ed.docLayersChanged.connect(self._timer.start)
+        self.ed.docItemsChanged.connect(self._timer.start)
+        self.ed.docItemsModified.connect(self._thumb_timer.start)
+        self.ed.docBackgroundChanged.connect(self._thumb_timer.start)
+        self.ed.projectSwitched.connect(self._on_project_switched)
         self.ed.sel.changed.connect(self._sync_selection)
         self.refresh()
+
+    @property
+    def doc(self):
+        return self.ed.doc   # документ активного проекта
+
+    def _on_project_switched(self):
+        self._collapsed.clear()
+        self._thumbs.clear()
+        self.refresh()
+        self._thumb_timer.start()
 
     # ------------------------------------------------------------------ build
     def refresh(self):

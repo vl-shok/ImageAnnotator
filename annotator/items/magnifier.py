@@ -42,7 +42,10 @@ def _hull(points):
 class MagnifierItem(AnnotationItem):
     TYPE = "magnifier"
     TITLE = "Выносной вид"
-    source_provider = staticmethod(lambda: None)   # задаётся документом: изображение фото
+    def source_provider(self):
+        """Фото (с коррекцией цвета) документа, в котором лежит лупа."""
+        doc = getattr(self.scene(), "ia_doc", None) if self.scene() is not None else None
+        return doc.display_image if doc is not None else None
     DEFAULTS = {"zoom": 2.5, "shape": "rect", "color": "#ff2020", "width": 2.5, "style": "solid",
                 "connectors": True, "line_style": "dash", "opacity": 1.0}
     PROPS = [

@@ -30,7 +30,12 @@ class SelectionManager(QObject):
         self.doc = doc
         self.items: list = []
         self.filter = SelectionFilter()
-        doc.itemsChanged.connect(self._prune)
+
+    def set_doc(self, doc, items=()):
+        """Переключиться на другой документ (проект) с его выделением."""
+        self.doc = doc
+        self.items = [i for i in items if doc.contains(i)]
+        self.changed.emit()
 
     # ------------------------------------------------------------
     def is_selectable(self, it) -> bool:
@@ -56,7 +61,7 @@ class SelectionManager(QObject):
                     out.append(i)
         return out
 
-    def _prune(self):
+    def prune(self):
         keep = [i for i in self.items if self.doc.contains(i) and i.isVisible()]
         if keep != self.items:
             self.items = keep
