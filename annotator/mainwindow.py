@@ -55,6 +55,7 @@ HOTKEYS = [
     ("Двойной клик / ПКМ по вершине", "Удалить вершину (или Alt+клик)"), ("Ctrl+M", "Коррекция цвета"),
     ("Ctrl+R / Ctrl+Shift+R", "Повернуть холст на 90° по / против часовой"),
     ("Ctrl+Enter (в тексте)", "Готово и снять выделение — фокус на холст"),
+    ("Ctrl+Alt+C / Ctrl+Alt+V", "Копировать / вставить стиль объекта (в объекты того же типа)"),
     ("Проекты", ""),
     ("Ctrl+Tab / Ctrl+Shift+Tab", "Следующий / предыдущий проект (и Ctrl+PgDown / Ctrl+PgUp, колесо над лентой)"),
     ("Ctrl+Shift+D", "Дублировать проект"), ("Ctrl+W", "Закрыть проект"),
@@ -172,6 +173,10 @@ class MainWindow(QMainWindow):
         A("copy", "Копировать", ed.copy, "Ctrl+C")
         A("paste", "Вставить", self.paste, "Ctrl+V")
         A("duplicate", "Дублировать", ed.duplicate, "Ctrl+D")
+        A("copy_style", "Копировать стиль", lambda: ed.sel.items and ed.copy_style(ed.sel.items[0]), "Ctrl+Alt+C",
+          tip="Запомнить оформление объекта (цвет, толщина, шрифт…)")
+        A("paste_style", "Вставить стиль", lambda: ed.paste_style(), "Ctrl+Alt+V",
+          tip="Применить скопированный стиль к выбранным объектам того же типа")
         A("delete", "Удалить", self.delete, "Delete")
         A("select_all", "Выделить всё", ed.sel.select_all, "Ctrl+A")
         A("deselect", "Снять выделение", ed.sel.clear, "Ctrl+Shift+A")
@@ -246,7 +251,8 @@ class MainWindow(QMainWindow):
         m.addAction(a["quit"])
 
         m = mb.addMenu("&Правка")
-        for k in ("undo", "redo", None, "cut", "copy", "paste", "duplicate", "delete", None, "select_all",
+        for k in ("undo", "redo", None, "cut", "copy", "paste", "duplicate", "delete", None, "copy_style",
+                  "paste_style", None, "select_all",
                   "deselect", None, "insert_image"):
             m.addSeparator() if k is None else m.addAction(a[k])
 
@@ -368,6 +374,7 @@ class MainWindow(QMainWindow):
         self.strip.pinnedChanged.connect(self.acts["strip_pin"].setChecked)
         ed.sel.changed.connect(self._update_actions)
         ed.rasterSelectionChanged.connect(self._update_actions)
+        ed.styleClipChanged.connect(self._update_actions)
         ed.docBackgroundChanged.connect(self._update_size)
         ed.docBackgroundChanged.connect(self._update_actions)
         ed.snapChanged.connect(lambda: self.acts["snap"].setChecked(ed.snap.enabled))
@@ -390,8 +397,11 @@ class MainWindow(QMainWindow):
         sel = bool(self.ed.sel.items)
         many = len(self.ed.sel.items) > 1
         raster = self.ed.raster_sel is not None
-        for k in ("duplicate", "front", "forward", "backward", "back", "lock"):
+        for k in ("duplicate", "front", "forward", "backward", "back", "lock", "copy_style"):
             self.acts[k].setEnabled(sel)
+        clip = self.ed.style_clip
+        self.acts["paste_style"].setEnabled(bool(self.ed.style_targets()))
+        self.acts["paste_style"].setText(f"Вставить стиль ({clip[1]})" if clip else "Вставить стиль")
         for k in ("cut", "copy", "delete"):
             self.acts[k].setEnabled(sel or raster)
         self.acts["group"].setEnabled(many)
@@ -833,6 +843,11 @@ class MainWindow(QMainWindow):
                     co = ed.sel.items[0]
                     m.addAction("Добавить стрелку", lambda: ed.begin_add_leader(co))
                 m.addSeparator()
+            src = it if it is not None and ed.sel.contains(it) else ed.sel.items[0]
+            m.addAction(f"Копировать стиль ({src.TITLE})", lambda: ed.copy_style(src))
+            if ed.style_targets():
+                m.addAction(f"Вставить стиль ({ed.style_clip[1]})", lambda: ed.paste_style())
+            m.addSeparator()
             res = [i for i in ed.sel.items if i.TYPE == "resistor"]
             if res:
                 a = m.addAction("Соотношение сторон 1 : 2", lambda: ed.resistor_aspect(res))

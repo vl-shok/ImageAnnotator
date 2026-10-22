@@ -1529,3 +1529,42 @@ def test_project_strip_wheel_and_overlay(tmp_path, monkeypatch):
     for p in ed.projects:
         p.undo.setClean()
     w.close()
+
+
+def test_copy_paste_style(ed):
+    src = TextItem({"text": "Источник", "color": "#00ff00", "size": 40, "bold": False, "italic": True,
+                    "bg_color": "#000000", "line_spacing": 1.5, "angle": 30.0})
+    src.set_prop("auto_size", False)
+    a = TextItem({"text": "A"})
+    b = TextItem({"text": "B"})
+    r = RectItem()
+    r.set_drag(QPointF(0, 0), QPointF(50, 50))
+    ed.add_items([src, a, b, r])
+    ed.copy_style(src)
+    # вставка — во все выбранные объекты того же типа; прямоугольник не трогаем
+    ed.sel.set([a, b, r])
+    assert ed.style_targets() == [a, b]
+    r_before = r.state()
+    ed.paste_style()
+    for t in (a, b):
+        for k in ("color", "size", "bold", "italic", "bg_color", "line_spacing"):
+            assert t.props[k] == src.props[k], k
+        # содержимое, поворот и размер рамки — свои
+        assert t.props["angle"] == 0 and t.props["auto_size"] is True
+    assert a.props["text"] == "A" and b.props["text"] == "B"
+    assert r.state() == r_before
+    # одна отмена
+    ed.undo.undo()
+    assert a.props["color"] != "#00ff00" and b.props["size"] != 40
+    # стиль переносится и в другой проект
+    ed.new_project()
+    c = TextItem({"text": "C"})
+    ed.add_items([c])
+    ed.sel.set([c])
+    ed.paste_style()
+    assert c.props["color"] == "#00ff00" and c.props["text"] == "C"
+    # заблокированный — не меняется
+    d = TextItem({"text": "D"})
+    ed.add_items([d])
+    d.locked = True
+    assert ed.style_targets([d]) == []

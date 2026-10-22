@@ -72,6 +72,7 @@ class Editor(QObject):
     docAdjustChanged = Signal()
     projectsChanged = Signal()        # состав, порядок, имена, отметки «изменён»
     projectSwitched = Signal()        # активным стал другой проект
+    styleClipChanged = Signal()       # «Копировать стиль»
 
     def __init__(self):
         super().__init__()
@@ -92,6 +93,7 @@ class Editor(QObject):
         self.raster_sel: QRect | None = None
         self.ask_text = lambda initial, title="Текст": None  # переопределяется UI
         self.paste_offset = 0
+        self.style_clip = None    # (тип, название, свойства) — «Копировать стиль»
         self.sel.changed.connect(self.bump_session)
         self.docItemsChanged.connect(self.sel.prune)
         self.docBackgroundChanged.connect(self._update_style_scale)
@@ -416,6 +418,37 @@ class Editor(QObject):
                     i.obj_visible = bool(value)
         self.change_items(items, fn, "Свойство")
         self.doc.itemsChanged.emit()
+
+    # ================================================================ стиль объекта
+    # не стиль: содержимое (текст, номер), поворот, размер рамки текста/выноски, коррекция цвета картинки
+    STYLE_SKIP = styles.NON_STYLE | {"auto_size", "box_w", "box_h"}
+
+    def copy_style(self, item):
+        """Запомнить оформление объекта (для «Вставить стиль» в объекты того же типа)."""
+        self.style_clip = (item.TYPE, item.TITLE,
+                           {k: copy.deepcopy(v) for k, v in item.props.items() if k not in self.STYLE_SKIP})
+        self.styleClipChanged.emit()
+        self.message.emit(f"Стиль скопирован: {item.TITLE} — ПКМ по объекту того же типа → «Вставить стиль»")
+
+    def style_targets(self, items=None) -> list:
+        """Объекты, к которым можно применить скопированный стиль (того же типа, не заблокированы)."""
+        clip = getattr(self, "style_clip", None)
+        if clip is None:
+            return []
+        return [i for i in (self.sel.items if items is None else items) if i.TYPE == clip[0] and not i.locked]
+
+    def paste_style(self, items=None):
+        targets = self.style_targets(items)
+        if not targets:
+            return
+        props = self.style_clip[2]
+
+        def fn():
+            for it in targets:
+                for k, v in props.items():
+                    if k in it.props and it.props[k] != v:
+                        it.set_prop(k, copy.deepcopy(v))
+        self.change_items(targets, fn, "Вставить стиль")
 
     def release_focus(self):
         """Закончить правку: снять выделение, фокус — на холст (Ctrl+Enter в тексте)."""
