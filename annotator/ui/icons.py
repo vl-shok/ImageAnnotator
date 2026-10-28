@@ -1,8 +1,6 @@
 """Иконки, нарисованные кодом (без внешних файлов)."""
 from __future__ import annotations
 
-import math
-
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
@@ -153,6 +151,16 @@ def _draw(name, p: QPainter):
         p.drawRect(QRectF(10, 16, 44, 32))
     elif name == "ellipse":
         p.drawEllipse(QRectF(8, 14, 48, 36))
+    elif name == "camera":
+        p.drawRoundedRect(QRectF(8, 20, 48, 32), 5, 5)
+        p.drawRect(QRectF(22, 13, 20, 7))
+        p.drawEllipse(QPointF(32, 36), 9, 9)
+    elif name == "check":
+        # галочка в квадрате
+        p.setPen(_pen(QColor(70, 200, 100), 4.0))
+        p.drawRoundedRect(QRectF(10, 10, 44, 44), 6, 6)
+        p.setPen(_pen(QColor(70, 200, 100), 6.0))
+        p.drawPolyline(QPolygonF([QPointF(20, 33), QPointF(29, 42), QPointF(45, 22)]))
     elif name == "resistor":
         # корпус с площадками на концах (вид сверху)
         p.setPen(Qt.NoPen)

@@ -30,7 +30,7 @@ PRJ_FILTER = f"Проект ImageAnnotator (*{PROJECT_EXT})"
 HOTKEYS = [
     ("Инструменты", ""),
     ("V", "Выбор"), ("M", "Выделение области фото"), ("K", "Обрезка / размер холста (и вставленного изображения)"), ("A", "Стрелка"), ("L", "Линия"), ("T", "Текст"),
-    ("C", "Выноска"), ("N", "Нумерация"), ("R", "Прямоугольник"), ("E", "Эллипс"), ("Q", "Резистор (место компонента)"), ("P", "Полилиния"),
+    ("C", "Выноска"), ("N", "Нумерация"), ("R", "Прямоугольник"), ("E", "Эллипс"), ("Q", "Резистор (место компонента)"), ("O", "Галочка «одобрено»"), ("P", "Полилиния"),
     ("G", "Полигон"), ("F", "Карандаш"), ("D", "Размер (расстояние)"), ("B", "Разрыв цепи"),
     ("Z", "Выносной вид (лупа): выделите область — рядом появится увеличение"),
     ("Навигация", ""),
@@ -55,6 +55,7 @@ HOTKEYS = [
     ("Двойной клик / ПКМ по вершине", "Удалить вершину (или Alt+клик)"), ("Ctrl+M", "Коррекция цвета"),
     ("Ctrl+R / Ctrl+Shift+R", "Повернуть холст на 90° по / против часовой"),
     ("Ctrl+Enter (в тексте)", "Готово и снять выделение — фокус на холст"),
+    ("Ctrl+Alt+A / Ctrl+Alt+W / Ctrl+Alt+F", "Снимок экрана: область / окно / весь экран (новым проектом)"),
     ("Ctrl+Alt+C / Ctrl+Alt+V", "Копировать / вставить стиль объекта (в объекты того же типа)"),
     ("Проекты", ""),
     ("Ctrl+Tab / Ctrl+Shift+Tab", "Следующий / предыдущий проект (и Ctrl+PgDown / Ctrl+PgUp, колесо над лентой)"),
@@ -105,6 +106,8 @@ class MainWindow(QMainWindow):
         for t in make_tools(self.ed):
             self.ed.register_tool(t)
         self.acts: dict[str, QAction] = {}
+        self._capturing = False       # идёт снимок экрана (окно спрятано)
+        self._overlay = None
         self._build_actions()
         self._build_menus()
         self._build_toolbars()
@@ -147,6 +150,10 @@ class MainWindow(QMainWindow):
         A("export", "Экспорт PNG / JPG / PDF…", self.export_dialog, "Ctrl+E", "export")
         A("export_quick", "Быстрый PNG (имя как в ленте, рядом с проектом)", self.export_quick, "Ctrl+Shift+E")
         A("png_all", "Быстрый PNG всех проектов", self.quick_png_all)
+        A("cap_region", "Снимок области экрана", lambda: self.capture_screen("region"), "Ctrl+Alt+A", "camera",
+          tip="Выделите область мышью (щелчок — окно под курсором); снимок откроется новым проектом")
+        A("cap_window", "Снимок окна", lambda: self.capture_screen("window"), "Ctrl+Alt+W")
+        A("cap_screen", "Снимок всего экрана", lambda: self.capture_screen("screen"), "Ctrl+Alt+F")
         A("save_all", "Сохранить все проекты", self.save_all, "Ctrl+Alt+S")
         A("project_dup", "Дублировать проект", lambda: self.duplicate(self.ed.project), "Ctrl+Shift+D",
           tip="Копия проекта открывается рядом как новый проект")
@@ -223,12 +230,22 @@ class MainWindow(QMainWindow):
         self.tool_group = QActionGroup(self)
         self.tool_group.setExclusive(True)
         icons = {"select": "select", "raster": "raster", "crop": "crop", "dimension": "dimension", "break": "break", "magnifier": "magnifier", "arrow": "arrow", "line": "line", "text": "text",
-                 "callout": "callout", "number": "number", "rect": "rect", "ellipse": "ellipse", "resistor": "resistor",
+                 "callout": "callout", "number": "number", "rect": "rect", "ellipse": "ellipse", "resistor": "resistor", "check": "check",
                  "polyline": "polyline", "polygon": "polygon", "freehand": "freehand"}
         for name, tool in ed.tools.items():
             a = A(f"tool_{name}", tool.title, (lambda n: (lambda: ed.set_tool(n)))(name), tool.shortcut,
                   icons.get(name), checkable=True)
             self.tool_group.addAction(a)
+
+    def _add_actions(self, target, keys):
+        """Добавить в меню/панель действия по ключам; None — разделитель."""
+        for k in keys:
+            target.addSeparator() if k is None else target.addAction(self.acts[k])
+
+    def _canvas_rotate_menu(self, menu):
+        sub = menu.addMenu("Повернуть / отразить холст")
+        self._add_actions(sub, ("canvas_cw", "canvas_ccw", "canvas_180", None, "canvas_fliph", "canvas_flipv"))
+        return sub
 
     def _build_menus(self):
         mb = self.menuBar()
@@ -238,6 +255,8 @@ class MainWindow(QMainWindow):
             m.addAction(a[k])
         self.recent_menu = m.addMenu("Последние файлы")
         self.recent_menu.aboutToShow.connect(self._fill_recent)
+        cap = m.addMenu(icon("camera"), "Снимок экрана")
+        self._add_actions(cap, ("cap_region", "cap_window", "cap_screen"))
         m.addSeparator()
         for k in ("save", "saveas", "save_all"):
             m.addAction(a[k])
@@ -251,19 +270,15 @@ class MainWindow(QMainWindow):
         m.addAction(a["quit"])
 
         m = mb.addMenu("&Правка")
-        for k in ("undo", "redo", None, "cut", "copy", "paste", "duplicate", "delete", None, "copy_style",
-                  "paste_style", None, "select_all",
-                  "deselect", None, "insert_image"):
-            m.addSeparator() if k is None else m.addAction(a[k])
+        self._add_actions(m, ("undo", "redo", None, "cut", "copy", "paste", "duplicate", "delete", None,
+                              "copy_style", "paste_style", None, "select_all", "deselect", None, "insert_image"))
 
         m = mb.addMenu("&Вид")
-        for k in ("fit", "actual", "zoom_in", "zoom_out", None, "snap", None, "strip_pin"):
-            m.addSeparator() if k is None else m.addAction(a[k])
+        self._add_actions(m, ("fit", "actual", "zoom_in", "zoom_out", None, "snap", None, "strip_pin"))
         self.view_menu = m
 
         m = mb.addMenu("&Объект")
-        for k in ("front", "forward", "backward", "back", None, "group", "ungroup", "lock"):
-            m.addSeparator() if k is None else m.addAction(a[k])
+        self._add_actions(m, ("front", "forward", "backward", "back", None, "group", "ungroup", "lock"))
         al = m.addMenu("Выровнять")
         for k in ("left", "hcenter", "right", "top", "vcenter", "bottom"):
             al.addAction(a[f"align_{k}"])
@@ -281,12 +296,10 @@ class MainWindow(QMainWindow):
         m.addAction(a["color"])
         m.addAction(a["color_reset"])
         m.addSeparator()
-        rot = m.addMenu("Повернуть / отразить холст")
-        for k in ("cw", "ccw", "180", None, "fliph", "flipv"):
-            rot.addSeparator() if k is None else rot.addAction(a[f"canvas_{k}"])
+        self._canvas_rotate_menu(m)
         m.addSeparator()
-        for k in ("raster_obj", "raster_fill", "raster_opacity", "raster_blur", "raster_crop", None, "image_uncrop"):
-            m.addSeparator() if k is None else m.addAction(a[k])
+        self._add_actions(m, ("raster_obj", "raster_fill", "raster_opacity", "raster_blur", "raster_crop", None,
+                              "image_uncrop"))
 
         m = mb.addMenu("С&правка")
         m.addAction(a["hotkeys"])
@@ -301,7 +314,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.LeftToolBarArea, tb)
         order = ["select", "raster", "crop", None, "arrow", "line", "text", "callout", "number", None,
                  "rect", "ellipse", "polyline", "polygon", "freehand", None, "dimension", "break", "magnifier",
-                 "resistor"]
+                 "resistor", "check"]
         for n in order:
             if n is None:
                 tb.addSeparator()
@@ -315,8 +328,18 @@ class MainWindow(QMainWindow):
         top.setMovable(False)
         top.setIconSize(QSize(18, 18))
         self.addToolBar(Qt.TopToolBarArea, top)
-        for k in ("open", "save", "export", "copy_result", None, "undo", "redo", None, "fit", "actual", None):
-            top.addSeparator() if k is None else top.addAction(self.acts[k])
+        self._add_actions(top, ("open", "save", "export", "copy_result", None, "undo", "redo", None, "fit", "actual", None))
+        # снимок экрана: щелчок по фотоаппарату — меню из трёх вариантов (без стрелки поверх иконки)
+        cap_btn = QToolButton()
+        cap_btn.setIcon(icon("camera"))
+        cap_btn.setToolTip("Снимок экрана: область (Ctrl+Alt+A), окно (Ctrl+Alt+W), весь экран (Ctrl+Alt+F)")
+        cap_menu = QMenu(cap_btn)
+        self._add_actions(cap_menu, ("cap_region", "cap_window", "cap_screen"))
+        cap_btn.setMenu(cap_menu)
+        cap_btn.setPopupMode(QToolButton.InstantPopup)
+        cap_btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+        top.insertWidget(self.acts["undo"], cap_btn)
+        top.insertSeparator(self.acts["undo"])
         from .ui.snap_popup import SnapButton
         self.snap_popup_btn = SnapButton(self.ed)
         top.addWidget(self.snap_popup_btn)
@@ -639,6 +662,59 @@ class MainWindow(QMainWindow):
             import subprocess
             subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
 
+    # ================================================================ снимок экрана
+    def capture_screen(self, mode: str):
+        """mode: region | window | screen. Окно программы на время снимка прячется."""
+        if getattr(self, "_capturing", False):
+            return
+        self._capturing = True
+        self._cap_state = self.windowState()
+        app = QGuiApplication.instance()
+        self._cap_quit = app.quitOnLastWindowClosed()
+        app.setQuitOnLastWindowClosed(False)    # пока окно спрятано, закрытие оверлея не завершает программу
+        self.hide()
+        QTimer.singleShot(350, lambda: self._grab(mode))     # дать окну исчезнуть с экрана
+
+    def _grab(self, mode):
+        from .ui import screen_capture as sc
+        try:
+            screen, pix = sc.grab_screen_under_cursor()
+            if mode == "screen":
+                self._capture_done(sc.image_of(pix))
+                return
+            windows = sc.windows_on_image(pix.size(), sc.monitor_origin_under_cursor())
+            if mode == "window" and not windows:
+                mode = "region"
+            # оверлей держим в поле окна — иначе Python удалит его сразу после выхода из функции
+            self._overlay = sc.CaptureOverlay(screen, pix, mode, windows)
+            self._overlay.finished.connect(self._capture_done)
+            self._overlay.start()
+        except Exception:
+            self._capture_done(None)     # что бы ни случилось — вернуть окно программы
+            raise
+
+    def _capture_done(self, img):
+        if not self._capturing:
+            return
+        self._capturing = False
+        self._overlay = None
+        QGuiApplication.instance().setQuitOnLastWindowClosed(getattr(self, "_cap_quit", True))
+        self.show()
+        self.setWindowState(self._cap_state)
+        self.raise_()
+        self.activateWindow()
+        if img is None or img.isNull():
+            return
+        from datetime import datetime
+        proj = self.ed.project_for_open()
+        self.ed.new_from_image(img.convertToFormat(QImage.Format_ARGB32_Premultiplied))
+        proj.name = self.ed.unique_name(f"Снимок {datetime.now():%Y-%m-%d %H-%M-%S}")
+        proj.unsaved_copy = True        # ещё не сохранён — при закрытии программа спросит
+        self.ed.projectsChanged.emit()
+        self._update_size()
+        QTimer.singleShot(0, self.view.fit)
+        self.statusBar().showMessage(f"Снимок {img.width()} × {img.height()} px — открыт новым проектом", 4000)
+
     def quick_png(self, proj, folder=None) -> str | None:
         """PNG с именем как в ленте рядом с проектом (иначе — рядом с фото); перезаписывается без вопросов."""
         if proj.doc.export_rect().isEmpty():
@@ -827,9 +903,8 @@ class MainWindow(QMainWindow):
                 return
         if ed.tool is not None and ed.tool.name == "raster" and ed.raster_sel is not None:
             m = QMenu(self)
-            for k in ("copy", "cut", "delete", None, "raster_obj", "raster_fill", "raster_opacity", "raster_blur",
-                      None, "raster_crop"):
-                m.addSeparator() if k is None else m.addAction(self.acts[k])
+            self._add_actions(m, ("copy", "cut", "delete", None, "raster_obj", "raster_fill", "raster_opacity",
+                                  "raster_blur", None, "raster_crop"))
             m.exec(gpos)
             return
         it = self.view.hit_item(spos)
@@ -843,6 +918,10 @@ class MainWindow(QMainWindow):
                     co = ed.sel.items[0]
                     m.addAction("Добавить стрелку", lambda: ed.begin_add_leader(co))
                 m.addSeparator()
+            dims = [i for i in ed.sel.items if i.TYPE == "dimension" and not i.locked]
+            if dims:
+                m.addAction("Надпись на другую сторону",
+                            lambda: ed.change_items(dims, lambda: [d.flip_label() for d in dims], "Сторона надписи"))
             src = it if it is not None and ed.sel.contains(it) else ed.sel.items[0]
             m.addAction(f"Копировать стиль ({src.TITLE})", lambda: ed.copy_style(src))
             if ed.style_targets():
@@ -873,13 +952,10 @@ class MainWindow(QMainWindow):
         else:
             if ed.doc.background is not None:
                 m.addAction("Коррекция цвета фото…", lambda: self.color_correction(None))
-                rot = m.addMenu("Повернуть / отразить холст")
-                for k in ("cw", "ccw", "180", None, "fliph", "flipv"):
-                    rot.addSeparator() if k is None else rot.addAction(self.acts[f"canvas_{k}"])
+                self._canvas_rotate_menu(m)
                 m.addSeparator()
-            for k in ("paste", "select_all", None, "insert_image", None, "fit", "actual", None, "copy_result",
-                      "export"):
-                m.addSeparator() if k is None else m.addAction(self.acts[k])
+            self._add_actions(m, ("paste", "select_all", None, "insert_image", None, "fit", "actual", None,
+                                  "copy_result", "export"))
         m.exec(gpos)
 
     def _fill_recent(self):

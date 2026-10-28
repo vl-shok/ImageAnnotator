@@ -1568,3 +1568,151 @@ def test_copy_paste_style(ed):
     ed.add_items([d])
     d.locked = True
     assert ed.style_targets([d]) == []
+
+
+def test_strip_stays_open_after_menu_duplicate(tmp_path, monkeypatch):
+    from PySide6.QtCore import QPoint, QSettings
+    from annotator import mainwindow, styles
+    import annotator.ui.project_strip as ps
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
+
+    class Menu(ps.QMenu):            # меню «щёлкает» пункт «Дублировать» вместо показа
+        def exec(self, *a):
+            for act in self.actions():
+                if act.text() == "Дублировать":
+                    act.trigger()
+    monkeypatch.setattr(ps, "QMenu", Menu)
+    styles.reset()
+    w = mainwindow.MainWindow()
+    w.resize(1000, 700)
+    w.show()
+    w.strip.set_pinned(False)
+    w.open_paths([_photo(tmp_path, "a.png")])
+    strip, ed = w.strip, w.ed
+    strip._hover = True                       # лента развёрнута наведением
+    strip.relayout()
+    QApplication.processEvents()
+    strip.context_menu(ed.project, QPoint(0, 0))
+    QApplication.processEvents()
+    assert len(ed.projects) == 2 and ed.project.display_name() == "a (копия)"
+    assert strip.is_expanded() and strip.height() == strip.expanded_height()   # не пропала
+    # мышь над лентой — не сворачивается; ушла — сворачивается
+    monkeypatch.setattr(strip, "cursor_inside", lambda: True)
+    strip._collapse_now()
+    assert strip.is_expanded()
+    monkeypatch.setattr(strip, "cursor_inside", lambda: False)
+    strip._collapse_now()
+    QApplication.processEvents()
+    assert not strip.is_expanded() and strip.height() == strip.collapsed_height()
+    for p in ed.projects:
+        p.unsaved_copy = False
+        p.undo.setClean()
+    w.close()
+
+
+def test_dimension_label_side(ed):
+    from annotator.items import DimensionItem
+    v = DimensionItem()
+    v.set_drag(QPointF(100, 100), QPointF(100, 400))       # вертикальный
+    h = DimensionItem()
+    h.set_drag(QPointF(200, 100), QPointF(500, 100))       # горизонтальный
+    ed.add_items([v, h])
+    c, ang, _ = v.label_geometry()
+    assert c.x() > v.a.x() and ang == 90                    # по умолчанию справа
+    ed.sel.set([v])
+    ed.change_items([v], v.flip_label, "Сторона надписи")
+    c, ang, _ = v.label_geometry()
+    assert c.x() < v.a.x() and ang == -90                   # слева, читается снизу вверх
+    c, ang, _ = h.label_geometry()
+    assert c.y() < h.a.y() and ang == 0
+    h.set_prop("label_side", "flip")
+    c, ang, _ = h.label_geometry()
+    assert c.y() > h.a.y() and ang == 0                     # под линией, не вверх ногами
+    ed.undo.undo()
+    assert v.props["label_side"] == "normal"
+    # сторона надписи — не стиль: не копируется и не становится умолчанием
+    ed.copy_style(h)
+    assert "label_side" not in ed.style_clip[2]
+    assert DimensionItem().props["label_side"] == "normal"
+
+
+def test_check_mark_tool(ed):
+    from PySide6.QtCore import Qt
+    from annotator.items import CheckItem
+    _tools_view(ed)
+    ed.set_tool("check")
+    _drag(ed.tool, QPointF(100, 100), QPointF(180, 150), Qt.ShiftModifier)    # Shift при рисовании — квадрат
+    c = [i for i in ed.doc.items() if i.TYPE == "check"][0]
+    assert c.rect.width() == c.rect.height() == 80
+    t0 = c.stroke()
+    ed.set_tool("select")
+    ed.sel.set([c])
+    br = _corner(c, "br")
+    _drag_shift_late(ed.tool, br, br + QPointF(80, 0))                         # пропорционально вдвое больше
+    assert abs(c.rect.width() - 160) < 1e-6 and abs(c.rect.height() - 160) < 1e-6
+    assert abs(c.stroke() - 2 * t0) < 1e-6                                     # толщина растёт вместе с размером
+    for frame in ("circle", "none"):
+        c.set_prop("frame", frame)
+        img = QImage(400, 400, QImage.Format_ARGB32_Premultiplied)
+        from PySide6.QtGui import QPainter
+        p = QPainter(img)
+        c.paint(p, None)
+        p.end()
+    c2 = CheckItem()
+    c2.apply_dict(c.to_dict(full=True))
+    assert c2.rect == c.rect and c2.props["frame"] == "none"
+
+
+def test_screen_capture_overlay_and_project(tmp_path, monkeypatch):
+    from PySide6.QtCore import QEvent, QPoint, QRect, QSettings, Qt
+    from PySide6.QtGui import QKeyEvent, QMouseEvent, QPixmap
+    from annotator import mainwindow, styles
+    from annotator.ui import screen_capture as sc
+    pm = QPixmap(800, 600)
+    pm.fill(QColor(10, 120, 200))
+    win = QRect(100, 100, 300, 200)
+
+    def run(mode, actions):
+        ov = sc.CaptureOverlay(None, pm, mode, [win])
+        ov.resize(800, 600)
+        got = []
+        ov.finished.connect(got.append)
+        for kind, pos, btn in actions:
+            t = {"press": QEvent.MouseButtonPress, "move": QEvent.MouseMove, "release": QEvent.MouseButtonRelease}[kind]
+            QApplication.sendEvent(ov, QMouseEvent(t, QPointF(pos), QPointF(pos), btn,
+                                                   btn if kind != "release" else Qt.NoButton, Qt.NoModifier))
+        return ov, got
+    L = Qt.LeftButton
+    # область: протянуть мышью
+    _, got = run("region", [("press", QPoint(500, 400), L), ("move", QPoint(600, 450), L), ("release", QPoint(620, 480), L)])
+    assert got and (got[0].width(), got[0].height()) == (120, 80)
+    # щелчок (без протягивания) — окно под курсором
+    _, got = run("region", [("press", QPoint(150, 150), L), ("release", QPoint(151, 150), L)])
+    assert got and (got[0].width(), got[0].height()) == (300, 200)
+    _, got = run("window", [("move", QPoint(200, 200), Qt.NoButton), ("press", QPoint(200, 200), L),
+                            ("release", QPoint(200, 200), L)])
+    assert got and got[0].width() == 300
+    # Esc — отмена
+    ov, got = run("region", [])
+    QApplication.sendEvent(ov, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+    assert got == [None]
+    # перечисление окон Windows не падает (только чтение списка окон)
+    assert isinstance(sc.top_level_windows(), list)
+    # готовый снимок — новый несохранённый проект «Снимок …»
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
+    styles.reset()
+    w = mainwindow.MainWindow()
+    w._cap_state = w.windowState()
+    w._capturing = True                       # как после capture_screen()
+    w._capture_done(pm.toImage())
+    p = w.ed.project
+    assert p.display_name().startswith("Снимок ") and p.is_modified()
+    assert (w.ed.doc.background.width(), w.ed.doc.background.height()) == (800, 600)
+    w._capturing = True
+    w._capture_done(pm.toImage())
+    assert len(w.ed.projects) == 2
+    for q in w.ed.projects:
+        q.unsaved_copy = False
+    w.close()
