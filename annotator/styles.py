@@ -11,7 +11,8 @@ import copy
 _STYLE: dict[str, dict] = {}
 
 # свойства, которые не являются «стилем» и не запоминаются
-NON_STYLE = {"text", "number", "angle", "brightness", "contrast", "saturation", "temperature", "curves"}
+NON_STYLE = {"text", "number", "angle", "brightness", "contrast", "saturation", "temperature", "curves",
+             "label_side"}
 
 # Размерные свойства хранятся «для фото ~1600 px» и масштабируются под размер
 # текущего изображения, чтобы стрелки/текст были одинаково заметны на любом фото.

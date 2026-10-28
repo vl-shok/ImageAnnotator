@@ -13,6 +13,7 @@ from ..props import OPACITY, PropSpec
 from .base import AnnotationItem, cap_dims, draw_line_with_caps, make_pen, qcolor
 
 ARROWS = [("out", "Наружу  ←→"), ("in", "Внутрь  →←")]
+LABEL_SIDES = [("normal", "Над линией / справа"), ("flip", "Под линией / слева")]
 S_DIM = "Размер"
 S_LBL = "Надпись"
 
@@ -22,13 +23,14 @@ class DimensionItem(AnnotationItem):
     TITLE = "Размер"
     DEFAULTS = {"color": "#ff2020", "width": 2.0, "arrow_size": 14.0, "arrows": "out", "opacity": 1.0,
                 "size": 20, "text": "", "unit": "мм", "scale": 1.0, "decimals": 0,
-                "bg": True, "bg_color": "#ffffff", "text_color": "#ff2020"}
+                "bg": True, "bg_color": "#ffffff", "text_color": "#ff2020", "label_side": "normal"}
     PROPS = [
         PropSpec("color", "Цвет линий", "color", S_DIM),
         PropSpec("width", "Толщина", "float", S_DIM, min=0.5, max=40, step=0.5, suffix=" px"),
         PropSpec("arrows", "Стрелки", "enum", S_DIM, options=ARROWS,
                  pair=PropSpec("arrow_size", "Размер", "float", min=1, max=300, step=1, suffix=" px")),
         PropSpec("text", "Свой текст", "text", S_LBL),
+        PropSpec("label_side", "Надпись", "enum", S_LBL, options=LABEL_SIDES),
         PropSpec("unit", "Единицы", "enum", S_LBL, options=[("px", "px"), ("мм", "мм"), ("см", "см"),
                                                             ("м", "м"), ("in", "in"), ("", "без единиц")]),
         PropSpec("scale", "Единиц в 1 px", "float", S_LBL, min=0.0001, max=100000, step=0.01),
@@ -130,6 +132,12 @@ class DimensionItem(AnnotationItem):
             # надпись над линией (по «экранному» верху для повёрнутой системы)
             up = QPointF(math.sin(math.radians(ang)), -math.cos(math.radians(ang)))
             n = up
+            if self.props.get("label_side") == "flip":
+                # с другой стороны: под линией; у почти вертикальной — слева, читается снизу вверх
+                # (верх букв — от линии, как на чертежах)
+                n = QPointF(-n.x(), -n.y())
+                if abs(ang) > 80:
+                    ang -= 180
         fm = QFontMetricsF(self.font())
         txt = self.value_text()
         w = fm.horizontalAdvance(txt) + 8
@@ -223,6 +231,10 @@ class DimensionItem(AnnotationItem):
         elif key == "b":
             self.b = QPointF(p)
         self.update()
+
+    def flip_label(self):
+        """Надпись — на другую сторону размерной линии."""
+        self.set_prop("label_side", "normal" if self.props.get("label_side") == "flip" else "flip")
 
     def handle_glue_key(self, idx):
         return {0: "a", 1: "b"}.get(idx)
