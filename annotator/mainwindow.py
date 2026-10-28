@@ -23,7 +23,7 @@ from .ui.project_strip import ProjectStrip
 from .ui.properties import PropertiesPanel
 
 APP_NAME = "ImageAnnotator"
-VERSION = "1.4"
+VERSION = "1.5"
 IMG_FILTER = "Изображения (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp)"
 PRJ_FILTER = f"Проект ImageAnnotator (*{PROJECT_EXT})"
 
