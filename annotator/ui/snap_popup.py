@@ -1,7 +1,7 @@
 """Всплывающая панель «Привязки и фильтр выделения» (кнопка на верхней панели)."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget,
                                QWidgetAction)
 

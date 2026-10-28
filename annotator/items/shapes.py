@@ -6,10 +6,11 @@ import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPolygonF
 
-from ..geometry import constrain_angle, mid, rect_snap_points, square_rect
+from ..geometry import (box_fixed_point, constrain_angle, handle_angle, mid, rect_snap_points, resize_box,
+                        square_rect)
 from ..props import CAP_STYLES, OPACITY, S_ENDS, PropSpec, cap_size, fill_props, line_props
-from .base import (AnnotationItem, arrow_head_size, draw_line_with_caps, make_pen, qcolor, quad_length,
-                   quad_point)
+from .base import (AnnotationItem, arrow_head_size, box_handle_cursor, draw_line_with_caps, make_pen, qcolor,
+                   quad_length, quad_point)
 
 
 # =====================================================================
@@ -906,23 +907,7 @@ class BoxItem(AnnotationItem):
     def handle_cursor(self, idx):
         if idx >= len(self.HANDLE_IDS):
             return Qt.PointingHandCursor
-        hid = self.HANDLE_IDS[idx]
-        diag = {"tl": 135, "br": 135, "tr": 45, "bl": 45, "t": 90, "b": 90, "l": 0, "r": 0}[hid]
-        a = (diag - self.angle()) % 180
-        if a < 22.5 or a >= 157.5:
-            return Qt.SizeHorCursor
-        if a < 67.5:
-            return Qt.SizeBDiagCursor
-        if a < 112.5:
-            return Qt.SizeVerCursor
-        return Qt.SizeFDiagCursor
-
-    def _fixed_point(self, r0: QRectF, hid: str, symmetric: bool) -> QPointF:
-        if symmetric:
-            return r0.center()
-        x = r0.center().x() if hid in ("t", "b") else (r0.right() if "l" in hid else r0.left())
-        y = r0.center().y() if hid in ("l", "r") else (r0.bottom() if "t" in hid else r0.top())
-        return QPointF(x, y)
+        return box_handle_cursor(self.HANDLE_IDS[idx], self.angle())
 
     def begin_handle_drag(self, idx):
         self._drag_rect = QRectF(self.rect)
@@ -936,28 +921,17 @@ class BoxItem(AnnotationItem):
         if keep_aspect and len(hid) == 1 and r0.width() > 0 and r0.height() > 0:
             return self._resize_side_keep_aspect(r0, hid, p, symmetric)
         if symmetric:
-            c = r0.center()
-            hw, hh = r0.width() / 2, r0.height() / 2
-            if "l" in hid or "r" in hid:
-                hw = abs(p.x() - c.x())
-            if "t" in hid or "b" in hid:
-                hh = abs(p.y() - c.y())
+            r = resize_box(r0, hid, p, True)
             if len(hid) == 2 and (keep_aspect or constrain) and r0.width() > 0 and r0.height() > 0:
+                c = r0.center()
+                hw, hh = r.width() / 2, r.height() / 2
                 ratio = 1.0 if constrain and not keep_aspect else r0.width() / r0.height()
                 if hw / max(hh, 1e-6) > ratio:
                     hh = hw / ratio
                 else:
                     hw = hh * ratio
-            return QRectF(c.x() - hw, c.y() - hh, 2 * hw, 2 * hh)
-        left, top, right, bottom = r0.left(), r0.top(), r0.right(), r0.bottom()
-        if "l" in hid:
-            left = p.x()
-        if "r" in hid:
-            right = p.x()
-        if "t" in hid:
-            top = p.y()
-        if "b" in hid:
-            bottom = p.y()
+                r = QRectF(c.x() - hw, c.y() - hh, 2 * hw, 2 * hh)
+            return r
         if keep_aspect and len(hid) == 2 and r0.width() > 0 and r0.height() > 0:
             ax = r0.right() if "l" in hid else r0.left()
             ay = r0.bottom() if "t" in hid else r0.top()
@@ -974,7 +948,7 @@ class BoxItem(AnnotationItem):
             ax = r0.right() if "l" in hid else r0.left()
             ay = r0.bottom() if "t" in hid else r0.top()
             return square_rect(QPointF(ax, ay), p)
-        return QRectF(QPointF(left, top), QPointF(right, bottom)).normalized()
+        return resize_box(r0, hid, p)
 
     @staticmethod
     def _resize_side_keep_aspect(r0: QRectF, hid: str, p: QPointF, symmetric: bool) -> QRectF:
@@ -1014,14 +988,9 @@ class BoxItem(AnnotationItem):
         self.update()
 
     def _rotate_to(self, p_local: QPointF, constrain: bool):
-        c = self.mapToScene(self.rect.center())
-        ps = self.mapToScene(p_local)
-        a = math.degrees(math.atan2(ps.y() - c.y(), ps.x() - c.x())) + 90.0
-        if constrain:
-            a = round(a / 15.0) * 15.0
-        a = (a + 180.0) % 360.0 - 180.0
+        a = handle_angle(self.mapToScene(self.rect.center()), self.mapToScene(p_local), constrain)
         self.prepareGeometryChange()
-        self.props["angle"] = round(a, 2)
+        self.props["angle"] = a
         self.apply_rotation()
         self.update()
 
@@ -1033,7 +1002,7 @@ class BoxItem(AnnotationItem):
         if getattr(self, "_drag_inv", None) is not None:
             p = self._drag_inv.map(self.mapToScene(p))  # в систему координат начала перетаскивания
         hid = self.HANDLE_IDS[idx]
-        fixed_local = self._fixed_point(r0, hid, symmetric)
+        fixed_local = box_fixed_point(r0, hid, symmetric)
         if self._drag_anchor is None or self._drag_anchor[0] != (hid, symmetric):
             tf = getattr(self, "_drag_tf", None)
             self._drag_anchor = ((hid, symmetric), tf.map(fixed_local) if tf is not None else self.mapToScene(fixed_local))

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QGraphicsScene
 
 from . import imageops
 from .items import AnnotationItem, BackgroundItem, create_from_dict
-from .items.image import image_from_b64, image_to_b64
+from .items.image import image_to_b64
 
 FORMAT_VERSION = 3
 PROJECT_EXT = ".iap"
@@ -56,7 +56,13 @@ class Document(QObject):
         self._adj_timer.setSingleShot(True)
         self._adj_timer.setInterval(60)
         self._adj_timer.timeout.connect(self._update_display_now)
+        self.version = 0          # растёт при любом изменении (по сигналам) — для кэшей (привязки и т.п.)
+        for sig in (self.itemsChanged, self.itemsModified, self.layersChanged, self.backgroundChanged):
+            sig.connect(self._bump_version)
         self.reset()
+
+    def _bump_version(self, *_):
+        self.version += 1
 
     # ================================================================ basic
     def reset(self):

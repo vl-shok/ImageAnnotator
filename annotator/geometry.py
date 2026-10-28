@@ -64,3 +64,43 @@ def rect_snap_points(r: QRectF):
         (r.center(), "center"),
     ]
     return pts
+
+
+# ---------------------------------------------------------------- маркеры рамки (tl, t, tr, r, br, b, bl, l)
+def box_fixed_point(r0: QRectF, hid: str, symmetric: bool = False) -> QPointF:
+    """Точка рамки, которая остаётся на месте при перетаскивании маркера hid (Alt — центр)."""
+    if symmetric:
+        return r0.center()
+    x = r0.center().x() if hid in ("t", "b") else (r0.right() if "l" in hid else r0.left())
+    y = r0.center().y() if hid in ("l", "r") else (r0.bottom() if "t" in hid else r0.top())
+    return QPointF(x, y)
+
+
+def resize_box(r0: QRectF, hid: str, p: QPointF, symmetric: bool = False) -> QRectF:
+    """Новая рамка, когда маркер hid перетащили в p (свободно; symmetric — от центра)."""
+    if symmetric:
+        c = r0.center()
+        hw, hh = r0.width() / 2, r0.height() / 2
+        if "l" in hid or "r" in hid:
+            hw = abs(p.x() - c.x())
+        if "t" in hid or "b" in hid:
+            hh = abs(p.y() - c.y())
+        return QRectF(c.x() - hw, c.y() - hh, 2 * hw, 2 * hh)
+    left, top, right, bottom = r0.left(), r0.top(), r0.right(), r0.bottom()
+    if "l" in hid:
+        left = p.x()
+    if "r" in hid:
+        right = p.x()
+    if "t" in hid:
+        top = p.y()
+    if "b" in hid:
+        bottom = p.y()
+    return QRectF(QPointF(left, top), QPointF(right, bottom)).normalized()
+
+
+def handle_angle(center: QPointF, p: QPointF, constrain: bool = False) -> float:
+    """Угол поворота по круглому маркеру над объектом: от центра к курсору (constrain — шаг 15°)."""
+    a = math.degrees(math.atan2(p.y() - center.y(), p.x() - center.x())) + 90.0
+    if constrain:
+        a = round(a / 15.0) * 15.0
+    return round((a + 180.0) % 360.0 - 180.0, 2)

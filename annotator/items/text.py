@@ -1,14 +1,12 @@
 """Текст, выноска (Callout) и нумерованный маркер."""
 from __future__ import annotations
 
-import math
-
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QTextLayout, QTextOption
 
-from ..geometry import dist, rect_snap_points
+from ..geometry import box_fixed_point, dist, handle_angle, rect_snap_points, resize_box
 from ..props import CAP_STYLES, OPACITY, S_LEADER, PropSpec, cap_size, text_props
-from .base import AnnotationItem, draw_line_with_caps, make_pen, qcolor
+from .base import AnnotationItem, box_handle_cursor, draw_line_with_caps, make_pen, qcolor
 
 DEFAULT_FONT = "Segoe UI"
 
@@ -229,16 +227,7 @@ class TextItem(AnnotationItem):
     def handle_cursor(self, idx):
         if idx == 8:
             return Qt.PointingHandCursor
-        hid = self.HANDLE_IDS[idx]
-        diag = {"tl": 135, "br": 135, "tr": 45, "bl": 45, "t": 90, "b": 90, "l": 0, "r": 0}[hid]
-        a = (diag - self.angle()) % 180
-        if a < 22.5 or a >= 157.5:
-            return Qt.SizeHorCursor
-        if a < 67.5:
-            return Qt.SizeBDiagCursor
-        if a < 112.5:
-            return Qt.SizeVerCursor
-        return Qt.SizeFDiagCursor
+        return box_handle_cursor(self.HANDLE_IDS[idx], self.angle())
 
     def begin_handle_drag(self, idx):
         self._drag = QRectF(self.box())
@@ -252,48 +241,19 @@ class TextItem(AnnotationItem):
     def move_handle(self, idx, p, constrain=False, symmetric=False):
         if idx == 8:
             # поворот: угол от центра блока к курсору (Shift — шаг 15°)
-            c = self.mapToScene(self.box().center())
-            ps = self.mapToScene(p)
-            a = math.degrees(math.atan2(ps.y() - c.y(), ps.x() - c.x())) + 90.0
-            if constrain:
-                a = round(a / 15.0) * 15.0
-            a = (a + 180.0) % 360.0 - 180.0
-            self.set_prop("angle", round(a, 2))
+            self.set_prop("angle", handle_angle(self.mapToScene(self.box().center()), self.mapToScene(p), constrain))
             return
         # ручки рамки — свободно меняем ширину/высоту блока (Alt — от центра)
         r0 = self._drag if isinstance(self._drag, QRectF) else QRectF(self.box())
         if getattr(self, "_drag_inv", None) is not None:
             p = self._drag_inv.map(self.mapToScene(p))
         hid = self.HANDLE_IDS[idx]
-        if symmetric:
-            fixed_local = r0.center()
-        else:
-            fx = r0.center().x() if hid in ("t", "b") else (r0.right() if "l" in hid else r0.left())
-            fy = r0.center().y() if hid in ("l", "r") else (r0.bottom() if "t" in hid else r0.top())
-            fixed_local = QPointF(fx, fy)
+        fixed_local = box_fixed_point(r0, hid, symmetric)
         if getattr(self, "_drag_anchor", None) is None or self._drag_anchor[0] != (hid, symmetric):
             tf = getattr(self, "_drag_tf", None)
             self._drag_anchor = ((hid, symmetric), tf.map(fixed_local) if tf is not None else self.mapToScene(fixed_local))
         fixed_scene = self._drag_anchor[1]
-        if symmetric:
-            c = r0.center()
-            hw, hh = r0.width() / 2, r0.height() / 2
-            if "l" in hid or "r" in hid:
-                hw = abs(p.x() - c.x())
-            if "t" in hid or "b" in hid:
-                hh = abs(p.y() - c.y())
-            new = QRectF(c.x() - hw, c.y() - hh, 2 * hw, 2 * hh)
-        else:
-            l, t_, r, b = r0.left(), r0.top(), r0.right(), r0.bottom()
-            if "l" in hid:
-                l = p.x()
-            if "r" in hid:
-                r = p.x()
-            if "t" in hid:
-                t_ = p.y()
-            if "b" in hid:
-                b = p.y()
-            new = QRectF(QPointF(l, t_), QPointF(r, b)).normalized()
+        new = resize_box(r0, hid, p, symmetric)
         w, h = max(10.0, new.width()), max(10.0, new.height())
         self.prepareGeometryChange()
         self.props["auto_size"] = False
@@ -630,25 +590,7 @@ class CalloutItem(AnnotationItem):
             drag = (QRectF(self.box()), QPointF(self.pos()), [QPointF(t) for t, _ in self.leaders])
         r0, pos0, tips0 = drag
         p = p + (self.pos() - pos0)          # точка в системе координат начала перетаскивания
-        if symmetric:
-            c = r0.center()
-            hw, hh = r0.width() / 2, r0.height() / 2
-            if "l" in hid or "r" in hid:
-                hw = abs(p.x() - c.x())
-            if "t" in hid or "b" in hid:
-                hh = abs(p.y() - c.y())
-            new = QRectF(c.x() - hw, c.y() - hh, 2 * hw, 2 * hh)
-        else:
-            l, t_, r, b = r0.left(), r0.top(), r0.right(), r0.bottom()
-            if "l" in hid:
-                l = p.x()
-            if "r" in hid:
-                r = p.x()
-            if "t" in hid:
-                t_ = p.y()
-            if "b" in hid:
-                b = p.y()
-            new = QRectF(QPointF(l, t_), QPointF(r, b)).normalized()
+        new = resize_box(r0, hid, p, symmetric)
         w, h = max(10.0, new.width()), max(10.0, new.height())
         self.props["auto_size"] = False
         self.props["box_w"] = round(w, 2)
@@ -679,9 +621,7 @@ class CalloutItem(AnnotationItem):
     def handle_cursor(self, idx):
         hid = self.box_handle(idx)
         if hid is not None:
-            return {"tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor, "tr": Qt.SizeBDiagCursor,
-                    "bl": Qt.SizeBDiagCursor, "t": Qt.SizeVerCursor, "b": Qt.SizeVerCursor,
-                    "l": Qt.SizeHorCursor, "r": Qt.SizeHorCursor}[hid]
+            return box_handle_cursor(hid)
         li = self.leader_index(idx)
         if li is None:
             return Qt.SizeAllCursor

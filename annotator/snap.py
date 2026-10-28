@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QGuiApplication
 
 from .geometry import dist, nearest_on_segment, rect_snap_points
 
@@ -52,6 +54,26 @@ class SnapManager:
         self.guides = True   # направляющие выравнивания (по горизонтали/вертикали с точками объектов, 45°)
         # объект, к точке которого привязались при последнем find: (объект, № точки или None, локальная точка)
         self.last_target = None
+        self._cache = None   # (документ, исключённые, версия документа, точки объектов)
+
+    def _object_points(self, doc, exclude):
+        """[(объект, габарит на сцене, [(точка сцены, вид, № точки, локальная точка)])] видимых объектов,
+        кроме exclude. Не пересчитывается, пока документ не менялся; во время перетаскивания мышью —
+        до отпускания кнопки (меняются только исключённые объекты: тянущийся и приклеенные к нему)."""
+        ex = frozenset(id(e) for e in exclude)
+        ver = getattr(doc, "version", None)
+        dragging = bool(QGuiApplication.mouseButtons() & Qt.LeftButton)
+        c = self._cache
+        if c is not None and c[0] is doc and c[1] == ex and (dragging or c[2] == ver):
+            return c[3]
+        data = []
+        for it in doc.items():
+            if id(it) in ex or not it.isVisible():
+                continue
+            pts = [(it.mapToScene(lp), kind, si, QPointF(lp)) for si, (lp, kind) in enumerate(it.snap_points())]
+            data.append((it, it.sceneBoundingRect(), pts))
+        self._cache = (doc, ex, ver, data)
+        return data
 
     def find(self, doc, pt: QPointF, tol: float, exclude=(), extra=None):
         """Возвращает (QPointF, kind) или None. tol — радиус в единицах сцены.
@@ -60,7 +82,6 @@ class SnapManager:
         self.last_target = None
         if not self.enabled or tol <= 0:
             return None
-        exclude = set(id(e) for e in exclude)
         best, bd, target = None, tol, None
         for sp, kind in (extra or []):
             if kind in self.kinds:
@@ -68,20 +89,16 @@ class SnapManager:
                 if d <= bd:
                     best, bd = (QPointF(sp), kind), d
         candidates = []
-        for it in doc.items():
-            if id(it) in exclude or not it.isVisible():
-                continue
-            br = it.sceneBoundingRect().adjusted(-tol, -tol, tol, tol)
-            if not br.contains(pt):
+        for it, br, pts in self._object_points(doc, exclude):
+            if not br.adjusted(-tol, -tol, tol, tol).contains(pt):
                 continue
             candidates.append(it)
-            for si, (lp, kind) in enumerate(it.snap_points()):
+            for sp, kind, si, lp in pts:
                 if kind not in self.kinds:
                     continue
-                sp = it.mapToScene(lp)
                 d = dist(sp, pt)
                 if d <= bd:
-                    best, bd, target = (sp, kind), d, (it, si, QPointF(lp))
+                    best, bd, target = (QPointF(sp), kind), d, (it, si, QPointF(lp))
         canvas = doc.canvas_rect()
         if self.to_image and not canvas.isEmpty() and doc.bg_item.isVisible():
             for lp, kind in rect_snap_points(canvas):
@@ -115,12 +132,9 @@ class SnapManager:
     # ================================================================ направляющие выравнивания
     def guide_refs(self, doc, exclude=(), extra=None) -> list[QPointF]:
         """Точки сцены, с которыми выравниваемся: характерные точки объектов, фото, extra."""
-        exclude = set(id(e) for e in exclude)
         refs = [QPointF(p) for p, _ in (extra or [])]
-        for it in doc.items():
-            if id(it) in exclude or not it.isVisible():
-                continue
-            refs += [it.mapToScene(lp) for lp, kind in it.snap_points() if kind != "edge"]
+        for _, _, pts in self._object_points(doc, exclude):
+            refs += [sp for sp, kind, _, _ in pts if kind != "edge"]
         canvas = doc.canvas_rect()
         if self.to_image and not canvas.isEmpty() and doc.bg_item.isVisible():
             refs += [QPointF(lp) for lp, _ in rect_snap_points(canvas)]
@@ -165,21 +179,40 @@ class SnapManager:
             x, used = first.project(pt), [first]
         return x, [(ln.ref, QPointF(x)) for ln in used]
 
+    def _sorted_refs(self, doc, exclude):
+        """Точки выравнивания, отсортированные по x и по y (пересчитываются вместе с кэшем точек)."""
+        refs = self.guide_refs(doc, exclude)
+        key = (id(self._cache[3]) if self._cache else None, len(refs))
+        c = getattr(self, "_sorted", None)
+        if c is not None and c[0] == key:
+            return c[1]
+        bx = sorted(refs, key=lambda r: r.x())
+        by = sorted(refs, key=lambda r: r.y())
+        data = ([r.x() for r in bx], bx, [r.y() for r in by], by)
+        self._sorted = (key, data)
+        return data
+
     def find_move_guides(self, doc, pts, delta: QPointF, tol: float, exclude=()):
         """Перемещение объектов: выровнять их точки pts (сцена, до сдвига) по горизонтали/вертикали
         с точками других объектов. Возвращает (поправленный сдвиг, [(откуда, куда)])."""
         if not (self.enabled and self.guides) or tol <= 0 or not pts:
             return QPointF(delta), []
-        refs = self.guide_refs(doc, exclude)
+        xs, xr, ys, yr = self._sorted_refs(doc, exclude)
         bx = by = None
         for p in pts:
             mx, my = p.x() + delta.x(), p.y() + delta.y()
-            for r in refs:
-                dx, dy = r.x() - mx, r.y() - my
-                if abs(dx) < tol and (bx is None or abs(dx) < abs(bx[0])):
-                    bx = (dx, r, p)
-                if abs(dy) < tol and (by is None or abs(dy) < abs(by[0])):
-                    by = (dy, r, p)
+            # ближайшие по x и по y точки — двоичным поиском по отсортированным координатам
+            for coords, refs, m, axis in ((xs, xr, mx, 0), (ys, yr, my, 1)):
+                i = bisect_left(coords, m)
+                for j in (i - 1, i):
+                    if 0 <= j < len(coords):
+                        dd = coords[j] - m
+                        best = bx if axis == 0 else by
+                        if abs(dd) < tol and (best is None or abs(dd) < abs(best[0])):
+                            if axis == 0:
+                                bx = (dd, refs[j], p)
+                            else:
+                                by = (dd, refs[j], p)
         d = QPointF(delta.x() + (bx[0] if bx else 0.0), delta.y() + (by[0] if by else 0.0))
         lines = []
         for b in (bx, by):

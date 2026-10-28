@@ -1,26 +1,19 @@
 """Контекстная панель свойств (справа).
 
-A: ничего не выбрано — документ, стиль нового объекта, привязки, фильтр выделения, коррекция фото.
+A: ничего не выбрано — документ, стиль нового объекта, коррекция фото.
 B: один объект — его свойства.
 C: несколько объектов — только общие свойства; различающиеся значения показываются как «Разные».
 """
 from __future__ import annotations
 
-import os
-
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QApplication, QSizePolicy, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-                               QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from .. import styles
 from ..items import REGISTRY
 from ..props import MIXED
-from ..snap import SNAP_KINDS
-from .histogram import HistogramWidget
-from ..props import PropSpec
-from .curves import CurvesEditor
-from .widgets import ColorButton, Section, SliderEditor, ToggleGrid, make_editor, pair_row
+from .widgets import ColorButton, Section, make_editor, pair_row
 
 
 def common_specs(items):
@@ -74,7 +67,6 @@ class PropertiesPanel(QScrollArea):
         editor.docBackgroundChanged.connect(self._on_bg)
         editor.docAdjustChanged.connect(self._refresh_adjust)
         editor.projectSwitched.connect(self.rebuild)
-        editor.snapChanged.connect(self._refresh_snap)
         editor.cropChanged.connect(self.update_crop_info)
         self.rebuild()
 
@@ -90,7 +82,6 @@ class PropertiesPanel(QScrollArea):
         self._adjust = {}
         self._hist = None
         self._layer_combo = None
-        self._snap_widgets = None
         self._doc_info = None
         self._adj_editor = None
         self._crop_info = None
@@ -340,31 +331,6 @@ class PropertiesPanel(QScrollArea):
         name = self.ed.project.display_name()   # как на вкладке проекта
         self._doc_info.setText(f"{name}\n{doc.background.width()} × {doc.background.height()} px, "
                                f"объектов: {len(doc.items())}")
-
-    def _set_snap_enabled(self, on):
-        self.ed.snap.enabled = on
-        self.ed.snapChanged.emit()
-
-    def _set_kind(self, k, on):
-        if k == "image":
-            self.ed.snap.to_image = on
-        elif k == "guides":
-            self.ed.snap.guides = on
-        elif on:
-            self.ed.snap.kinds.add(k)
-        else:
-            self.ed.snap.kinds.discard(k)
-
-    def _refresh_snap(self):
-        if self._snap_widgets is not None:
-            master, grid = self._snap_widgets
-            try:
-                master.blockSignals(True)
-                master.setChecked(self.ed.snap.enabled)
-                master.blockSignals(False)
-                grid.setEnabled(self.ed.snap.enabled)
-            except RuntimeError:
-                self._snap_widgets = None
 
     def _refresh_adjust(self):
         self._hist_timer.start()

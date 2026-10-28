@@ -2,7 +2,7 @@
 рисуются только во view и в экспорт не попадают. Разрешение — исходное."""
 from __future__ import annotations
 
-from PySide6.QtCore import QMarginsF, QRectF, QSizeF, Qt
+from PySide6.QtCore import QMarginsF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter
 
 

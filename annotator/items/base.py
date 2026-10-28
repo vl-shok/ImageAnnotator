@@ -179,6 +179,19 @@ def rotate_point(p: QPointF, c: QPointF, deg: float) -> QPointF:
     return QPointF(c.x() + dx * cs - dy * sn, c.y() + dx * sn + dy * cs)
 
 
+def box_handle_cursor(hid: str, angle: float = 0.0):
+    """Курсор маркера рамки hid с учётом поворота объекта."""
+    diag = {"tl": 135, "br": 135, "tr": 45, "bl": 45, "t": 90, "b": 90, "l": 0, "r": 0}[hid]
+    a = (diag - angle) % 180
+    if a < 22.5 or a >= 157.5:
+        return Qt.SizeHorCursor
+    if a < 67.5:
+        return Qt.SizeBDiagCursor
+    if a < 112.5:
+        return Qt.SizeVerCursor
+    return Qt.SizeFDiagCursor
+
+
 class AnnotationItem(QGraphicsItem):
     TYPE = "object"
     TITLE = "Объект"
