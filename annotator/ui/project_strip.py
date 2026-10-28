@@ -10,14 +10,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLineEdit, QMenu, QScrollArea, QSizePolicy, QToolButton,
                                QWidget)
 
 from .icons import icon
 
 ACCENT = QColor(0, 150, 255)
-CANVAS_BG = QColor(38, 40, 44)     # фон холста — активная вкладка такого же цвета
 TAB_W = 150
 TAB_H = 28
 THUMB_H = 80
@@ -139,9 +138,13 @@ class _Content(QWidget):
         dim.setAlpha(160)
         line = QColor(fg)          # рамки и заливки — от цвета текста темы (видны и в светлой, и в тёмной)
         line.setAlpha(60)
-        tab_bg, tab_hover = QColor(fg), QColor(fg)
-        tab_bg.setAlpha(18)
-        tab_hover.setAlpha(36)
+        # активная вкладка — самая светлая (и в тёмной, и в светлой теме), остальные — приглушённые
+        win = self.palette().window().color()
+        dark = win.lightness() < 128
+        tab_on = win.lighter(185) if dark else QColor(255, 255, 255)
+        tab_bg = win.darker(125) if dark else win.darker(110)
+        tab_hover = win.lighter(130) if dark else win.darker(103)
+        text_on = QColor(255, 255, 255) if dark else QColor(20, 22, 26)
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         tiles, plus = self.tile_rects()
@@ -155,28 +158,28 @@ class _Content(QWidget):
             tr = QRectF(self.tab_rect(r)).adjusted(0.5, 0.5, -0.5, 0)
             path = _tab_path(tr)
             p.setPen(Qt.NoPen)
-            # активная вкладка — просто темнее (как холст); синим выделяется только её миниатюра
-            p.fillPath(path, CANVAS_BG if active else (tab_hover if hover else tab_bg))
-            if not active:
-                p.setPen(QPen(line, 1))
-                p.drawPath(path)
+            p.fillPath(path, tab_on if active else (tab_hover if hover else tab_bg))
+            p.setPen(QPen(line, 1))
+            p.drawPath(path)
             # имя
             nr = self.name_rect(r)
             name = proj.display_name() + (" *" if proj.is_modified() else "")
             f = QFont(self.font())
             f.setBold(active)
             p.setFont(f)
-            p.setPen(QColor(235, 238, 242) if active else dim)
+            p.setPen(text_on if active else dim)
             p.drawText(nr, Qt.AlignVCenter | Qt.AlignLeft, QFontMetrics(f).elidedText(name, Qt.ElideMiddle, nr.width()))
             # «×» — на активной и под мышью
             if active or hover:
                 cr = QRectF(self.close_rect(r))
                 if self._hover_close is proj:
                     p.setPen(Qt.NoPen)
-                    p.setBrush(QColor(255, 255, 255, 50) if active else tab_hover)
+                    hc = QColor(text_on)
+                    hc.setAlpha(45)
+                    p.setBrush(hc)
                     p.drawEllipse(cr)
                     p.setBrush(Qt.NoBrush)
-                p.setPen(QPen(QColor(235, 238, 242) if active else dim, 1.4))
+                p.setPen(QPen(text_on if active else dim, 1.4))
                 k = 4
                 c = cr.center()
                 p.drawLine(QPointF(c.x() - k, c.y() - k), QPointF(c.x() + k, c.y() + k))
@@ -428,12 +431,19 @@ class ProjectStrip(QFrame):
         self.relayout()
         self.pinnedChanged.emit(on)
 
+    LINGER_MS = 1500     # после меню/переименования лента не сворачивается сразу
+
     def hold(self, on: bool):
-        """Держать как есть (переименование, меню) — не сворачивать."""
+        """Держать как есть (переименование, меню) — не сворачивать.
+        После этого развёрнутая лента остаётся открытой; свернётся, если мышь ушла с неё."""
         self._hold = max(0, self._hold + (1 if on else -1))
-        if self._hold == 0 and not self.underMouse():
-            self._hover = False
+        if self._hold == 0 and self._hover and not self.pinned:
+            self._collapse_timer.start(self.LINGER_MS)
         self.relayout()
+
+    def cursor_inside(self) -> bool:
+        """Мышь над лентой — по положению курсора (после закрытия меню underMouse() ещё не обновлён)."""
+        return self.isVisible() and self.rect().contains(self.mapFromGlobal(QCursor.pos()))
 
     def _scrollbar_h(self) -> int:
         """Полоса прокрутки — только если вкладки не помещаются."""
@@ -474,12 +484,15 @@ class ProjectStrip(QFrame):
         super().enterEvent(ev)
 
     def leaveEvent(self, ev):
-        if not self.pinned:
-            self._collapse_timer.start()
+        if not self.pinned and self._hold == 0:
+            self._collapse_timer.start(350)
         super().leaveEvent(ev)
 
     def _collapse_now(self):
-        if self.underMouse() or self._hold > 0:
+        if self._hold > 0:
+            return
+        if self.cursor_inside():
+            self._collapse_timer.start(self.LINGER_MS)   # мышь всё ещё над лентой — проверить позже
             return
         if self._hover:
             self._hover = False
