@@ -1724,3 +1724,36 @@ def test_screen_capture_overlay_and_project(tmp_path, monkeypatch):
     for q in w.ed.projects:
         q.unsaved_copy = False
     w.close()
+
+
+def test_rect_text_inside(ed):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+    from annotator.items import EllipseItem, RectItem
+
+    def ink(item):
+        img = QImage(400, 200, QImage.Format_ARGB32)
+        img.fill(0)
+        p = QPainter(img)
+        item.paint(p, None)
+        p.end()
+        # непрозрачные пиксели внутри фигуры (без контура)
+        return sum(1 for x in range(100, 300, 2) for y in range(60, 140, 2) if img.pixelColor(x, y).alpha() > 0)
+
+    for cls in (RectItem, EllipseItem):
+        it = cls()
+        it.rect = QRectF(0, 0, 400, 200)
+        assert ink(it) == 0 and not it.filled_hit()
+        it.set_prop("text", "Проверить пайку")      # ввели текст — сразу показывается
+        assert it.props["show_text"] and it.text_shown() and it.filled_hit()
+        assert ink(it) > 0
+        assert "Проверить" in it.describe()
+        it.set_prop("show_text", False)
+        assert ink(it) == 0
+        # старый проект без новых свойств открывается, текст выключен
+        d = it.to_dict()
+        for k in ("show_text", "text", "padding"):
+            d["props"].pop(k, None)
+        from annotator.items import create_from_dict
+        old = create_from_dict(d)
+        assert not old.text_shown()

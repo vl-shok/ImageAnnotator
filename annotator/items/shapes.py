@@ -8,7 +8,9 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPolygonF
 
 from ..geometry import (box_fixed_point, constrain_angle, handle_angle, mid, rect_snap_points, resize_box,
                         square_rect)
-from ..props import CAP_STYLES, OPACITY, S_ENDS, PropSpec, cap_size, fill_props, line_props
+from ..props import (ALIGNS, CAP_STYLES, LINE_SPACING, OPACITY, S_ENDS, S_TEXT, VALIGNS, PropSpec, cap_size,
+                     fill_props, line_props)
+from .text import ALIGN_FLAGS, DEFAULT_FONT, VALIGN_FLAGS, draw_text_block, line_spacing, make_font
 from .base import (AnnotationItem, arrow_head_size, box_handle_cursor, draw_line_with_caps, make_pen, qcolor,
                    quad_length, quad_point)
 
@@ -1038,14 +1040,37 @@ def _view_scale():
 ANGLE = PropSpec("angle", "Угол поворота", "float", "Геометрия", min=-180, max=180, step=1, suffix="°")
 
 
+# Текст внутри фигуры (прямоугольник, эллипс): включается галочкой, переносится по словам в границах фигуры
+BOX_TEXT_DEFAULTS = {"show_text": False, "text": "", "font": DEFAULT_FONT, "size": 24, "bold": False, "italic": False,
+                     "text_color": "#ff2020", "align": "center", "valign": "middle", "line_spacing": 1.0,
+                     "padding": 6}
+
+
+def box_text_props():
+    return [
+        PropSpec("show_text", "Текст внутри", "bool", S_TEXT),
+        PropSpec("text", "Текст", "text", S_TEXT),
+        PropSpec("font", "Шрифт", "font", S_TEXT),
+        PropSpec("size", "Размер", "int", S_TEXT, min=4, max=600, suffix=" px"),
+        PropSpec("text_color", "Цвет текста", "color", S_TEXT),
+        PropSpec("bold", "Начертание", "toggle", S_TEXT, icon="B", tip="Жирный",
+                 pair=PropSpec("italic", "Курсив", "toggle", icon="I", tip="Курсив")),
+        PropSpec("align", "Выравнивание", "align", S_TEXT, options=ALIGNS,
+                 pair=PropSpec("valign", "По вертикали", "align", options=VALIGNS)),
+        LINE_SPACING,
+        PropSpec("padding", "Отступ", "int", S_TEXT, min=0, max=200, suffix=" px"),
+    ]
+
+
 class RectItem(BoxItem):
     TYPE = "rect"
     TITLE = "Прямоугольник"
     ROTATABLE = True
     DEFAULTS = {"color": "#ff2020", "width": 3.0, "style": "solid", "opacity": 1.0,
-                "fill": False, "fill_color": "#ffd800", "fill_opacity": 0.3, "radius": 0, "angle": 0.0}
+                "fill": False, "fill_color": "#ffd800", "fill_opacity": 0.3, "radius": 0, "angle": 0.0,
+                **BOX_TEXT_DEFAULTS}
     PROPS = line_props() + [PropSpec("radius", "Скругление", "int", "Линия", min=0, max=500, suffix=" px")] \
-        + fill_props() + [ANGLE, OPACITY]
+        + fill_props() + box_text_props() + [ANGLE, OPACITY]
 
     def outline_path(self):
         path = QPainterPath()
@@ -1057,7 +1082,21 @@ class RectItem(BoxItem):
         return path
 
     def filled_hit(self):
-        return bool(self.props.get("fill"))
+        return bool(self.props.get("fill")) or self.text_shown()
+
+    def set_prop(self, name, value):
+        super().set_prop(name, value)
+        if name == "text" and (value or "").strip() and not self.props.get("show_text"):
+            self.props["show_text"] = True   # ввели текст (двойной клик) — сразу показать его
+            self.update()
+
+    def text_shown(self) -> bool:
+        return bool(self.props.get("show_text")) and bool((self.props.get("text") or "").strip())
+
+    def text_rect(self) -> QRectF:
+        """Где помещается текст: фигура минус толщина линии и отступ."""
+        m = float(self.props.get("padding", 6) or 0) + float(self.props.get("width", 0) or 0) / 2
+        return self.rect.normalized().adjusted(m, m, -m, -m)
 
     def paint(self, painter, option, widget=None):
         painter.setRenderHint(QPainter.Antialiasing)
@@ -1071,6 +1110,26 @@ class RectItem(BoxItem):
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawPath(path)
+        if self.text_shown():
+            self.paint_text(painter)
+
+    def paint_text(self, painter):
+        p = self.props
+        tr = self.text_rect()
+        if tr.width() <= 1 or tr.height() <= 1:
+            return
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        font = make_font(p)
+        painter.setFont(font)
+        painter.setPen(QColor(p.get("text_color", "#ff2020")))
+        flags = ALIGN_FLAGS.get(p.get("align"), Qt.AlignHCenter) | VALIGN_FLAGS.get(p.get("valign"), Qt.AlignVCenter) \
+            | Qt.TextWordWrap
+        draw_text_block(painter, tr, flags, p.get("text", ""), font, line_spacing(p))
+
+    def describe(self):
+        t = (self.props.get("text") or "").replace("\n", " ") if self.text_shown() else ""
+        r = self.rect
+        return f"{self.TITLE}{': ' + t[:16] if t else ''} {r.width():.0f}×{r.height():.0f}"
 
 
 class EllipseItem(RectItem):
@@ -1078,13 +1137,19 @@ class EllipseItem(RectItem):
     TITLE = "Эллипс"
     CREATE_FROM_CENTER = True
     DEFAULTS = {"color": "#ff2020", "width": 3.0, "style": "solid", "opacity": 1.0,
-                "fill": False, "fill_color": "#ffd800", "fill_opacity": 0.3, "angle": 0.0}
-    PROPS = line_props() + fill_props() + [ANGLE, OPACITY]
+                "fill": False, "fill_color": "#ffd800", "fill_opacity": 0.3, "angle": 0.0, **BOX_TEXT_DEFAULTS}
+    PROPS = line_props() + fill_props() + box_text_props() + [ANGLE, OPACITY]
 
     def outline_path(self):
         path = QPainterPath()
         path.addEllipse(self.rect)
         return path
+
+    def text_rect(self) -> QRectF:
+        """Вписанный в эллипс прямоугольник (стороны / √2)."""
+        r = super().text_rect()
+        k = (1 - 0.7071) / 2
+        return r.adjusted(r.width() * k, r.height() * k, -r.width() * k, -r.height() * k)
 
     def snap_points(self):
         r = self.rect
