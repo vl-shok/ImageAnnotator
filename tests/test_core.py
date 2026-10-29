@@ -1704,7 +1704,6 @@ def test_screen_capture_overlay_and_project(tmp_path, monkeypatch):
     monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
     styles.reset()
     w = mainwindow.MainWindow()
-    w._cap_state = w.windowState()
     w._capturing = True                       # как после capture_screen()
     w._capture_done(pm.toImage())
     p = w.ed.project
@@ -1713,6 +1712,15 @@ def test_screen_capture_overlay_and_project(tmp_path, monkeypatch):
     w._capturing = True
     w._capture_done(pm.toImage())
     assert len(w.ed.projects) == 2
+    # новый файл предлагается сохранить в папку, куда сохраняли предыдущий
+    d = tmp_path / "saved"
+    d.mkdir()
+    monkeypatch.setattr(mainwindow.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(d / "first.iap"), "")))
+    assert w.save_as()
+    w._capturing = True
+    w._capture_done(pm.toImage())
+    assert os.path.dirname(w._default_base()) == str(d)
     for q in w.ed.projects:
         q.unsaved_copy = False
     w.close()

@@ -561,6 +561,7 @@ class MainWindow(QMainWindow):
         self.ed.doc.project_path = path
         ok = self.save()
         if ok:
+            self.settings.setValue("last_dir", os.path.dirname(path))     # следующий новый файл — в ту же папку
             self._add_recent(path)
         return ok
 
@@ -585,6 +586,7 @@ class MainWindow(QMainWindow):
         ext = os.path.splitext(path)[1].lower().lstrip(".")
         if export.export_file(self.ed.doc, path):
             self.settings.setValue("export_fmt", "jpg" if ext == "jpeg" else ext)
+            self.settings.setValue("last_dir", os.path.dirname(path))
             self.statusBar().showMessage(f"Экспортировано: {path}", 5000)
         else:
             QMessageBox.warning(self, APP_NAME, f"Не удалось экспортировать:\n{path}")
@@ -664,15 +666,18 @@ class MainWindow(QMainWindow):
 
     # ================================================================ снимок экрана
     def capture_screen(self, mode: str):
-        """mode: region | window | screen. Окно программы на время снимка прячется."""
+        """mode: region | window | screen. Окно программы на время снимка становится прозрачным.
+
+        Не hide(): после hide()/show() Windows возвращает развёрнутое окно в маленький размер,
+        а новый снимок вписывается в крошечный холст.
+        """
         if getattr(self, "_capturing", False):
             return
         self._capturing = True
-        self._cap_state = self.windowState()
         app = QGuiApplication.instance()
         self._cap_quit = app.quitOnLastWindowClosed()
-        app.setQuitOnLastWindowClosed(False)    # пока окно спрятано, закрытие оверлея не завершает программу
-        self.hide()
+        app.setQuitOnLastWindowClosed(False)    # закрытие оверлея ни при каких условиях не завершает программу
+        self.setWindowOpacity(0.0)
         QTimer.singleShot(350, lambda: self._grab(mode))     # дать окну исчезнуть с экрана
 
     def _grab(self, mode):
@@ -699,8 +704,7 @@ class MainWindow(QMainWindow):
         self._capturing = False
         self._overlay = None
         QGuiApplication.instance().setQuitOnLastWindowClosed(getattr(self, "_cap_quit", True))
-        self.show()
-        self.setWindowState(self._cap_state)
+        self.setWindowOpacity(1.0)
         self.raise_()
         self.activateWindow()
         if img is None or img.isNull():
@@ -713,6 +717,7 @@ class MainWindow(QMainWindow):
         self.ed.projectsChanged.emit()
         self._update_size()
         QTimer.singleShot(0, self.view.fit)
+        QTimer.singleShot(200, self.view.fit)    # ещё раз, когда окно точно вернулось на экран
         self.statusBar().showMessage(f"Снимок {img.width()} × {img.height()} px — открыт новым проектом", 4000)
 
     def quick_png(self, proj, folder=None) -> str | None:
@@ -726,6 +731,7 @@ class MainWindow(QMainWindow):
                     self, f"Куда сохранить PNG «{proj.display_name()}»", self._last_dir())
                 if not folder:
                     return None
+                self.settings.setValue("last_dir", folder)
             path = os.path.join(folder, proj.display_name() + ".png")
         if export.export_file(proj.doc, path):
             self.statusBar().showMessage(f"PNG: {path}", 5000)
