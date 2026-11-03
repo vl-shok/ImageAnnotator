@@ -1757,3 +1757,101 @@ def test_rect_text_inside(ed):
         from annotator.items import create_from_dict
         old = create_from_dict(d)
         assert not old.text_shown()
+
+
+def test_cross_item(ed):
+    from PySide6.QtCore import QRectF
+    from annotator.items import REGISTRY, CrossItem
+    from annotator.tools.draw_tools import make_tools
+    assert REGISTRY["cross"] is CrossItem and "cross" in [t.name for t in make_tools(ed)]
+    it = CrossItem()
+    it.rect = QRectF(0, 0, 100, 100)
+    b = it.mark_path().boundingRect()
+    assert b.width() > 80 and b.height() > 80          # без рамки — почти из угла в угол
+    it.set_prop("frame", "box")
+    assert it.mark_path().boundingRect().width() < 60   # в рамке — внутри неё
+
+
+def test_delete_project_file(tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QMessageBox
+    from annotator import mainwindow, styles
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
+    trashed = []
+
+    class FakeFile:                                   # без настоящей Корзины
+        def __init__(self, path):
+            self.path = path
+
+        def moveToTrash(self):
+            trashed.append(self.path)
+            os.remove(self.path)
+            return True
+    monkeypatch.setattr(mainwindow, "QFile", FakeFile)
+    answer = {"v": QMessageBox.Cancel}
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: answer["v"])
+    styles.reset()
+    w = mainwindow.MainWindow()
+    img = QImage(200, 100, QImage.Format_ARGB32_Premultiplied)
+    img.fill(QColor(20, 80, 40))
+    w.ed.new_from_image(img)
+    w.ed.add_items([line((10, 10), (100, 50))])
+    proj = w.ed.project
+    # не сохранён — удалять нечего
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    assert not w.delete_project_file(proj)
+    path = str(tmp_path / "plate.iap")
+    w.ed.save_project(path)
+    w.ed.doc.project_path = path
+    w._add_recent(path)
+    # отмена — файл на месте, вкладка открыта
+    assert not w.delete_project_file(proj) and os.path.exists(path) and proj in w.ed.projects
+    answer["v"] = QMessageBox.Yes
+    assert w.delete_project_file(proj)
+    assert trashed == [path] and not os.path.exists(path)
+    assert proj not in w.ed.projects
+    assert path not in (w.settings.value("recent", [], type=list) or [])
+    for q in w.ed.projects:
+        q.unsaved_copy = False
+    w.close()
+
+
+def test_space_rotation_several(ed):
+    import math
+
+    def mid(it):
+        a, b = it.scene_points()
+        return (a + b) / 2
+    # три отдельные линии — каждая поворачивается на месте (середины не двигаются)
+    ls = [line((100, 100), (300, 100)), line((400, 300), (400, 500)), line((600, 100), (700, 200))]
+    ed.add_items(ls)
+    ed.sel.set(ls)
+    m0 = [mid(i) for i in ls]
+    ed.rotate_selected(45)
+    for i, m in zip(ls, m0):
+        assert (mid(i) - m).manhattanLength() < 1e-6
+    a, b = ls[0].scene_points()
+    assert math.isclose(abs(b.x() - a.x()), abs(b.y() - a.y()), abs_tol=1e-6)    # повернулась на 45°
+    # приклеенные друг к другу — целиком, как одна фигура; после полного оборота — на месте
+    t = [line((100, 400), (300, 400)), line((300, 400), (200, 550)), line((200, 550), (100, 400))]
+    ed.add_items(t)
+    for x, y in ((t[1], t[0]), (t[2], t[1])):
+        ed.set_glue(x, "s", {"uid": y.uid, "i": None, "k": "edge", "p": [y.points[1].x(), y.points[1].y()]})
+    assert sorted(len(c) for c in ed.rotation_clusters(ls + t)) == [1, 1, 1, 3]
+    ed.sel.set(t)
+    p0 = [p for i in t for p in i.scene_points()]
+    for _ in range(8):
+        ed.rotate_selected(45)
+    p1 = [p for i in t for p in i.scene_points()]
+    assert max((p - q).manhattanLength() for p, q in zip(p0, p1)) < 1e-6
+    ed.rotate_selected(90)
+    a0, a1 = t[0].scene_points()
+    b0, _ = t[1].scene_points()
+    assert (a1 - b0).manhattanLength() < 1e-6          # концы остались вместе
+    # группа — тоже целиком
+    g = [line((500, 400), (550, 400)), line((650, 400), (700, 400))]
+    ed.add_items(g)
+    for i in g:
+        i.group_id = "g1"
+    assert len(ed.rotation_clusters(g)) == 1

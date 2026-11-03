@@ -5,9 +5,9 @@ import copy
 import json
 import os
 
-from PySide6.QtCore import QPointF, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QFile, QPointF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QGuiApplication, QImage, QKeySequence
-from PySide6.QtWidgets import (QDialog, QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow, QMenu,
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow, QMenu,
                                QMessageBox, QSplitter, QToolBar, QToolButton, QWidget)
 
 from . import export, styles
@@ -30,7 +30,8 @@ PRJ_FILTER = f"Проект ImageAnnotator (*{PROJECT_EXT})"
 HOTKEYS = [
     ("Инструменты", ""),
     ("V", "Выбор"), ("M", "Выделение области фото"), ("K", "Обрезка / размер холста (и вставленного изображения)"), ("A", "Стрелка"), ("L", "Линия"), ("T", "Текст"),
-    ("C", "Выноска"), ("N", "Нумерация"), ("R", "Прямоугольник"), ("E", "Эллипс"), ("Q", "Резистор (место компонента)"), ("O", "Галочка «одобрено»"), ("P", "Полилиния"),
+    ("C", "Выноска"), ("N", "Нумерация"), ("R", "Прямоугольник"), ("E", "Эллипс"), ("Q", "Резистор (место компонента)"), ("O", "Галочка «одобрено»"), ("X", "Крестик «не устанавливать»"),
+    ("P", "Полилиния"),
     ("G", "Полигон"), ("F", "Карандаш"), ("D", "Размер (расстояние)"), ("B", "Разрыв цепи"),
     ("Z", "Выносной вид (лупа): выделите область — рядом появится увеличение"),
     ("Навигация", ""),
@@ -41,7 +42,8 @@ HOTKEYS = [
     ("Shift + тянуть ручку", "Переместить объект(ы) за эту точку"),
     ("Shift (перемещение)", "Только по горизонтали/вертикали"),
     ("Стрелки / Shift+стрелки", "Сдвиг на 1 / 10 px"),
-    ("Пробел / Shift+пробел", "Повернуть выделенное на 45° по / против часовой"),
+    ("Пробел / Shift+пробел", "Повернуть на 45° по / против часовой: каждый объект на месте, "
+                               "приклеенные друг к другу и группы — целиком"),
     ("Рамка слева→направо", "Выбрать объекты целиком внутри"),
     ("Рамка справа→налево", "Выбрать всё, что пересекает рамку"),
     ("Enter / двойной клик", "Завершить полилинию / полигон"), ("Esc", "Отмена / инструмент выбора"),
@@ -158,6 +160,8 @@ class MainWindow(QMainWindow):
         A("project_dup", "Дублировать проект", lambda: self.duplicate(self.ed.project), "Ctrl+Shift+D",
           tip="Копия проекта открывается рядом как новый проект")
         A("project_close", "Закрыть проект", lambda: self.close_project(self.ed.project), "Ctrl+W")
+        A("project_delete", "Удалить проект с диска…", lambda: self.delete_project_file(self.ed.project), None, "layer_del",
+          tip="Файл проекта переносится в Корзину, вкладка закрывается")
         A("project_next", "Следующий проект", lambda: self.step_project(1, wrap=True), ["Ctrl+Tab", "Ctrl+PgDown"])
         A("project_prev", "Предыдущий проект", lambda: self.step_project(-1, wrap=True),
           ["Ctrl+Shift+Tab", "Ctrl+PgUp"])
@@ -230,7 +234,7 @@ class MainWindow(QMainWindow):
         self.tool_group = QActionGroup(self)
         self.tool_group.setExclusive(True)
         icons = {"select": "select", "raster": "raster", "crop": "crop", "dimension": "dimension", "break": "break", "magnifier": "magnifier", "arrow": "arrow", "line": "line", "text": "text",
-                 "callout": "callout", "number": "number", "rect": "rect", "ellipse": "ellipse", "resistor": "resistor", "check": "check",
+                 "callout": "callout", "number": "number", "rect": "rect", "ellipse": "ellipse", "resistor": "resistor", "check": "check", "cross": "cross",
                  "polyline": "polyline", "polygon": "polygon", "freehand": "freehand"}
         for name, tool in ed.tools.items():
             a = A(f"tool_{name}", tool.title, (lambda n: (lambda: ed.set_tool(n)))(name), tool.shortcut,
@@ -264,8 +268,8 @@ class MainWindow(QMainWindow):
         for k in ("export", "export_quick", "png_all", "copy_result", "print"):
             m.addAction(a[k])
         m.addSeparator()
-        for k in ("project_dup", "project_close", "project_next", "project_prev"):
-            m.addAction(a[k])
+        for k in ("project_dup", "project_close", "project_next", "project_prev", None, "project_delete"):
+            m.addAction(a[k]) if k else m.addSeparator()
         m.addSeparator()
         m.addAction(a["quit"])
 
@@ -314,7 +318,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.LeftToolBarArea, tb)
         order = ["select", "raster", "crop", None, "arrow", "line", "text", "callout", "number", None,
                  "rect", "ellipse", "polyline", "polygon", "freehand", None, "dimension", "break", "magnifier",
-                 "resistor", "check"]
+                 "resistor", "check", "cross"]
         for n in order:
             if n is None:
                 tb.addSeparator()
@@ -657,6 +661,36 @@ class MainWindow(QMainWindow):
         if cur in self.ed.projects:
             self.ed.switch_project(cur)
         self.statusBar().showMessage(f"Сохранено проектов: {n}", 3000)
+
+    def delete_project_file(self, proj) -> bool:
+        """Удалить файл проекта с диска (в Корзину) и закрыть его вкладку. Исходное фото не трогается."""
+        path = proj.doc.project_path
+        if not path or not os.path.exists(path):
+            QMessageBox.information(self, APP_NAME, "Проект ещё не сохранён на диск — удалять нечего.\n"
+                                                    "Чтобы убрать вкладку, закройте проект (Ctrl+W).")
+            return False
+        box = QMessageBox(QMessageBox.Warning, APP_NAME,
+                          f"Удалить проект «{proj.display_name()}» с диска?\n\n{os.path.normpath(path)}\n\n"
+                          "Файл будет перенесён в Корзину, вкладка закроется. Исходное фото не удаляется.",
+                          QMessageBox.Yes | QMessageBox.Cancel, self)
+        box.button(QMessageBox.Yes).setText("Удалить")
+        box.setDefaultButton(QMessageBox.Cancel)
+        png = self.ed.quick_png_path(proj)
+        if png and os.path.exists(png):
+            box.setCheckBox(QCheckBox(f"Также удалить картинку {os.path.basename(png)}"))
+        if box.exec() != QMessageBox.Yes:
+            return False
+        targets = [path] + ([png] if box.checkBox() is not None and box.checkBox().isChecked() else [])
+        for t in targets:
+            if not QFile(t).moveToTrash():
+                QMessageBox.warning(self, APP_NAME, f"Не удалось удалить файл:\n{t}")
+                return False
+        rec = self.settings.value("recent", [], type=list) or []
+        self.settings.setValue("recent", [r for r in rec if os.path.normcase(r) != os.path.normcase(path)])
+        self.ed.close_project(proj)
+        self._update_title()
+        self.statusBar().showMessage(f"Проект удалён в Корзину: {os.path.basename(path)}", 5000)
+        return True
 
     def reveal(self, proj):
         path = proj.doc.project_path or proj.doc.image_path

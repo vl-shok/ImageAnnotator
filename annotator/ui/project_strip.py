@@ -553,6 +553,8 @@ class ProjectStrip(QFrame):
             m.addSeparator()
             a = m.addAction("Показать в папке", lambda: cb.reveal(proj))
             a.setEnabled(bool(proj.doc.project_path or proj.doc.image_path))
+            a = m.addAction(icon("layer_del"), "Удалить проект с диска…", lambda: cb.delete_project_file(proj))
+            a.setEnabled(bool(proj.doc.project_path))
         else:
             m.addSeparator()
             m.addAction(icon("open"), "Открыть…", cb.open_dialog)
