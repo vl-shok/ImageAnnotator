@@ -569,34 +569,70 @@ class Editor(QObject):
             self.unglue_detached(items)
         self.change_items(items, fn, "Сдвиг", merge_key=("nudge", self.session))
 
+    @staticmethod
+    def rotation_clusters(items) -> list[list]:
+        """Части выделения, которые поворачиваются целиком: объекты, приклеенные друг к другу
+        (прямо или по цепочке), и группы. Остальные объекты — каждый сам по себе."""
+        parent = {i.uid: i.uid for i in items}
+
+        def root(u):
+            while parent[u] != u:
+                parent[u] = parent[parent[u]]
+                u = parent[u]
+            return u
+
+        def join(a, b):
+            parent[root(a)] = root(b)
+        by_group = {}
+        for i in items:
+            for g in i.glue.values():
+                if g.get("uid") in parent:
+                    join(i.uid, g["uid"])
+            if i.group_id:
+                if i.group_id in by_group:
+                    join(i.uid, by_group[i.group_id])
+                else:
+                    by_group[i.group_id] = i.uid
+        out = {}
+        for i in items:
+            out.setdefault(root(i.uid), []).append(i)
+        return list(out.values())
+
     def rotate_selected(self, deg=45.0):
         """Пробел / Shift+пробел: повернуть выделенное на ±45°.
-        Один объект — вокруг своего центра, несколько — вокруг общего центра."""
+        Каждый объект — вокруг своего центра; приклеенные друг к другу и сгруппированные —
+        целиком, вокруг общего центра."""
         movable = [i for i in self.sel.items if self.sel.is_movable(i)]
         items = [i for i in movable if i.can_rotate()]
         if len(items) < len(movable):
             self.message.emit("Лупа не поворачивается пробелом")
         if not items:
             return
-        center = None
-        if len(items) > 1:
-            key = (tuple(i.uid for i in items), self.undo.index())
-            cached = getattr(self, "_rot_center", None)
-            if cached and cached[0] == key:
-                center = cached[1]      # серия нажатий — центр не «плывёт»
-            else:
-                r = items[0].content_rect()
-                for i in items[1:]:
+        cached = getattr(self, "_rot_centers", None)
+        prev = cached[1] if cached and cached[0] == self.undo.index() else {}
+        centers = {}
+        plan = []
+        for cl in self.rotation_clusters(items):
+            if len(cl) == 1:
+                plan.append((cl, None))
+                continue
+            key = tuple(i.uid for i in cl)
+            c = prev.get(key)               # серия нажатий — центр не «плывёт»
+            if c is None:
+                r = cl[0].content_rect()
+                for i in cl[1:]:
                     r = r.united(i.content_rect())
-                center = r.center()
+                c = r.center()
+            centers[key] = c
+            plan.append((cl, c))
 
         def fn():
-            for i in items:
-                i.rotate_step(deg, center)
+            for cl, c in plan:
+                for i in cl:
+                    i.rotate_step(deg, c)
             self.unglue_detached(items)
         self.change_items(items, fn, f"Поворот {deg:+g}°")
-        if center is not None:
-            self._rot_center = ((tuple(i.uid for i in items), self.undo.index()), center)
+        self._rot_centers = (self.undo.index(), centers)
 
     def toggle_lock(self):
         items = list(self.sel.items)
