@@ -161,6 +161,11 @@ def _draw(name, p: QPainter):
         p.drawRoundedRect(QRectF(10, 10, 44, 44), 6, 6)
         p.setPen(_pen(QColor(70, 200, 100), 6.0))
         p.drawPolyline(QPolygonF([QPointF(20, 33), QPointF(29, 42), QPointF(45, 22)]))
+    elif name == "cross":
+        # крестик «не устанавливать»
+        p.setPen(_pen(QColor(235, 70, 70), 6.0))
+        p.drawLine(QPointF(14, 14), QPointF(50, 50))
+        p.drawLine(QPointF(50, 14), QPointF(14, 50))
     elif name == "resistor":
         # корпус с площадками на концах (вид сверху)
         p.setPen(Qt.NoPen)

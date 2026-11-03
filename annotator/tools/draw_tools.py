@@ -10,7 +10,7 @@ from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPen
 
 from ..geometry import constrain_angle, dist
-from ..items import (ArrowItem, BreakItem, CalloutItem, CheckItem, DimensionItem, MagnifierItem, EllipseItem, FreehandItem, LineItem, NumberItem,
+from ..items import (ArrowItem, BreakItem, CalloutItem, CheckItem, CrossItem, DimensionItem, MagnifierItem, EllipseItem, FreehandItem, LineItem, NumberItem,
                      PolygonItem, PolylineItem, RectItem, ResistorItem, TextItem)
 from .base import Tool, ToolEvent
 
@@ -602,6 +602,7 @@ def make_tools(editor):
         TwoPointTool(editor, EllipseItem, "ellipse", "Эллипс", "E", box=True),
         TwoPointTool(editor, ResistorItem, "resistor", "Резистор (место компонента)", "Q", box=True),
         TwoPointTool(editor, CheckItem, "check", "Галочка «одобрено»", "O", box=True),
+        TwoPointTool(editor, CrossItem, "cross", "Крестик «не устанавливать»", "X", box=True),
         PolyTool(editor, PolylineItem, "polyline", "Полилиния", "P"),
         PolyTool(editor, PolygonItem, "polygon", "Полигон", "G"),
         FreehandTool(editor),

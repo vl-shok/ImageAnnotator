@@ -1,4 +1,5 @@
-"""Отметка «одобрено»: галочка в квадрате (или в круге), масштабируется и поворачивается."""
+"""Отметки: галочка «одобрено» и крестик «не устанавливать» — в квадрате, круге или без рамки;
+масштабируются и поворачиваются."""
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Qt
@@ -9,7 +10,7 @@ from ..props import OPACITY, PropSpec
 from .base import qcolor
 from .shapes import ANGLE, BoxItem
 
-S_MARK = "Галочка"
+S_MARK = "Отметка"
 FRAMES = [("box", "Квадрат"), ("circle", "Круг"), ("none", "Без рамки")]
 # галочка в долях рамки: левый конец, нижняя точка, правый конец
 CHECK = ((0.24, 0.53), (0.43, 0.72), (0.78, 0.30))
@@ -48,6 +49,9 @@ class CheckItem(BoxItem):
             rad = min(inner.width(), inner.height()) * 0.12
             path.addRoundedRect(inner, rad, rad)
         return path
+
+    def mark_path(self) -> QPainterPath:
+        return self.check_path()
 
     def check_path(self) -> QPainterPath:
         r = self.rect.normalized()
@@ -91,9 +95,29 @@ class CheckItem(BoxItem):
             painter.setPen(fp)
             painter.drawPath(self.frame_path())
             painter.setPen(pen)
-        painter.drawPath(self.check_path())
+        painter.drawPath(self.mark_path())
 
     def describe(self):
         r = self.rect
         return f"{self.TITLE} {r.width():.0f}×{r.height():.0f}"
 
+
+class CrossItem(CheckItem):
+    """Крестик «не устанавливать» (DNP): компонент, который не монтируется."""
+    TYPE = "cross"
+    TITLE = "Крестик"
+    DEFAULTS = {**CheckItem.DEFAULTS, "color": "#e02020", "frame": "none", "fill": False}
+    INSET = 0.25          # в рамке — крестик внутри неё
+    INSET_BARE = 0.08     # без рамки — почти из угла в угол
+
+    def mark_path(self) -> QPainterPath:
+        r = self.rect.normalized()
+        frame = self.props.get("frame", "none")
+        k = {"none": self.INSET_BARE, "circle": self.INSET + 0.05}.get(frame, self.INSET)
+        dx, dy = r.width() * k, r.height() * k
+        a = r.adjusted(dx, dy, -dx, -dy)
+        path = QPainterPath(a.topLeft())
+        path.lineTo(a.bottomRight())
+        path.moveTo(a.topRight())
+        path.lineTo(a.bottomLeft())
+        return path
