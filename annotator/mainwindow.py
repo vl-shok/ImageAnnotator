@@ -61,7 +61,8 @@ HOTKEYS = [
     ("Ctrl+Alt+C / Ctrl+Alt+V", "Копировать / вставить стиль объекта (в объекты того же типа)"),
     ("Проекты", ""),
     ("Ctrl+Tab / Ctrl+Shift+Tab", "Следующий / предыдущий проект (и Ctrl+PgDown / Ctrl+PgUp, колесо над лентой)"),
-    ("Ctrl+Shift+D", "Дублировать проект"), ("Ctrl+W", "Закрыть проект"),
+    ("Ctrl+Shift+D", "Дублировать проект"), ("Ctrl+W", "Закрыть проект"), ("Ctrl+Shift+W", "Закрыть все проекты"),
+    ("Ctrl+Shift+0", "Вписать в окно все проекты"),
     ("Ctrl+Alt+S", "Сохранить все проекты"), ("Ctrl+Shift+E", "Быстрый PNG (имя как в ленте)"),
     ("Ctrl+Alt+G", "Менеджер групп"), ("Shift+S", "Привязка вкл/выкл"),
     ("Ctrl+D", "Дублировать"), ("Ctrl+G / Ctrl+Shift+G", "Группировать / разгруппировать"),
@@ -160,6 +161,7 @@ class MainWindow(QMainWindow):
         A("project_dup", "Дублировать проект", lambda: self.duplicate(self.ed.project), "Ctrl+Shift+D",
           tip="Копия проекта открывается рядом как новый проект")
         A("project_close", "Закрыть проект", lambda: self.close_project(self.ed.project), "Ctrl+W")
+        A("project_close_all", "Закрыть все проекты", self.close_all, "Ctrl+Shift+W")
         A("project_delete", "Удалить проект с диска…", lambda: self.delete_project_file(self.ed.project), None, "layer_del",
           tip="Файл проекта переносится в Корзину, вкладка закрывается")
         A("project_next", "Следующий проект", lambda: self.step_project(1, wrap=True), ["Ctrl+Tab", "Ctrl+PgDown"])
@@ -195,6 +197,8 @@ class MainWindow(QMainWindow):
           tip="Вставить изображение (например, фото правильного компонента)")
 
         A("fit", "Вписать в окно", self.view.fit, ["Ctrl+0", "Home"], "fit")
+        A("fit_all", "Вписать в окно все проекты", lambda: ed.fit_all_projects(), "Ctrl+Shift+0", "fit_all",
+          tip="Все открытые проекты — по размеру окна (например, после изменения размера окна)")
         A("actual", "Масштаб 100%", self.view.actual_size, "Ctrl+1", "actual")
         A("zoom_in", "Увеличить", lambda: self.view.zoom_at(1.25, self.view.viewport().rect().center()),
           ["Ctrl+=", "Ctrl++"])
@@ -268,7 +272,8 @@ class MainWindow(QMainWindow):
         for k in ("export", "export_quick", "png_all", "copy_result", "print"):
             m.addAction(a[k])
         m.addSeparator()
-        for k in ("project_dup", "project_close", "project_next", "project_prev", None, "project_delete"):
+        for k in ("project_dup", "project_close", "project_close_all", "project_next", "project_prev", None,
+                  "project_delete"):
             m.addAction(a[k]) if k else m.addSeparator()
         m.addSeparator()
         m.addAction(a["quit"])
@@ -332,7 +337,7 @@ class MainWindow(QMainWindow):
         top.setMovable(False)
         top.setIconSize(QSize(18, 18))
         self.addToolBar(Qt.TopToolBarArea, top)
-        self._add_actions(top, ("open", "save", "export", "copy_result", None, "undo", "redo", None, "fit", "actual", None))
+        self._add_actions(top, ("open", "save", "export", "copy_result", None, "undo", "redo", None, "fit", "fit_all", "actual", None))
         # снимок экрана: щелчок по фотоаппарату — меню из трёх вариантов (без стрелки поверх иконки)
         cap_btn = QToolButton()
         cap_btn.setIcon(icon("camera"))
@@ -634,6 +639,14 @@ class MainWindow(QMainWindow):
             if not self.close_project(q):
                 return
         self.ed.switch_project(proj)
+
+    def close_all(self) -> bool:
+        """Закрыть все проекты (о несохранённых — спросить); остаётся один пустой."""
+        for q in list(self.ed.projects):
+            if not self.close_project(q):
+                return False
+        self._update_title()
+        return True
 
     def close_right(self, proj):
         i = self.ed.projects.index(proj)
@@ -986,8 +999,18 @@ class MainWindow(QMainWindow):
             m.addAction(self.acts["group"])
             m.addAction(self.acts["ungroup"])
             m.addAction(self.acts["lock"])
-            if len(ed.sel.items) == 1 and ed.sel.items[0].TYPE == "image":
+            imgs = [i for i in ed.sel.items if i.TYPE == "image"]
+            if imgs:
                 m.addSeparator()
+                rm = m.addMenu("Повернуть / отразить изображение")
+                rm.addAction("Повернуть на 90° по часовой", lambda: ed.rotate_images(imgs, 90))
+                rm.addAction("Повернуть на 90° против часовой",
+                             lambda: ed.rotate_images(imgs, -90))
+                rm.addAction("Повернуть на 180°", lambda: ed.rotate_images(imgs, 180))
+                rm.addSeparator()
+                rm.addAction("Отразить по горизонтали", lambda: ed.flip_images(imgs, "flip_h"))
+                rm.addAction("Отразить по вертикали", lambda: ed.flip_images(imgs, "flip_v"))
+            if len(ed.sel.items) == 1 and ed.sel.items[0].TYPE == "image":
                 m.addAction("Коррекция цвета изображения…", lambda: self.color_correction(ed.sel.items[0]))
         else:
             if ed.doc.background is not None:

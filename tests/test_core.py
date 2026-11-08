@@ -1855,3 +1855,107 @@ def test_space_rotation_several(ed):
     for i in g:
         i.group_id = "g1"
     assert len(ed.rotation_clusters(g)) == 1
+
+
+def test_image_flip(ed):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QPainter
+    from annotator.items import ImageItem
+    pic = QImage(100, 50, QImage.Format_ARGB32_Premultiplied)
+    pic.fill(QColor(255, 0, 0))
+    QPainter(pic).fillRect(50, 0, 50, 25, QColor(0, 0, 255))   # синий — правый верхний угол
+    it = ImageItem(pic)
+    it.setPos(200, 200)
+    ed.add_items([it])
+
+    def color_at(x, y):
+        img = QImage(100, 50, QImage.Format_ARGB32)
+        img.fill(0)
+        p = QPainter(img)
+        it.paint(p, None)
+        p.end()
+        return img.pixelColor(x, y).blue() > 200
+    assert color_at(80, 10) and not color_at(20, 10)
+    ed.flip_images([it], "flip_h")
+    assert it.props["flip_h"] and color_at(20, 10) and not color_at(80, 10)
+    ed.flip_images([it], "flip_v")
+    assert color_at(20, 40) and not color_at(20, 10)
+    ed.undo.undo()
+    ed.undo.undo()
+    assert not it.props["flip_h"] and not it.props["flip_v"]
+    # область фото на отражённой картинке — те же пиксели, что видны на экране
+    ed.flip_images([it], "flip_h")
+    px, _ = it.pixel_rect(QRectF(200, 200, 50, 25))     # видимый левый верх — это бывший правый верх
+    assert px.x() >= 50 and px.y() == 0
+    # обрезка левой половины отражённой картинки оставляет правую половину пикселей
+    it.crop_to_scene_rect(QRectF(200, 200, 50, 50))
+    assert it.src.x() == 50 and it.src.width() == 50
+    it.reset_crop()
+    assert it.src == QRectF(0, 0, 100, 50)
+    assert abs(it.mapToScene(it.rect.topLeft()).x() - 200) < 1e-6
+    # отражение холста отражает и вставленную картинку
+    ed.transform_canvas("fliph")
+    assert not it.props["flip_h"]
+    ed.transform_canvas("flipv")
+    assert it.props["flip_v"]
+    # угол из свойств / пробелом сразу поворачивает картинку
+    ed.sel.set([it])
+    ed.rotate_selected(45)
+    assert it.rotation() == it.angle() != 0
+
+
+def test_rotate_images_menu(ed):
+    from annotator.items import ImageItem
+    pic = QImage(100, 50, QImage.Format_ARGB32_Premultiplied)
+    it = ImageItem(pic)
+    it.setPos(200, 200)
+    ed.add_items([it])
+    c = it.mapToScene(it.rect.center())
+    ed.rotate_images([it], 90)
+    assert it.angle() == 90 and it.rotation() == 90
+    assert (it.mapToScene(it.rect.center()) - c).manhattanLength() < 1e-6     # центр на месте
+    ed.rotate_images([it], 180)
+    assert it.angle() == -90
+    ed.undo.undo()
+    assert it.angle() == 90
+
+
+def test_close_all_and_fit_all(tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings, Qt
+    from annotator import mainwindow, styles
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
+    styles.reset()
+    w = mainwindow.MainWindow()
+    w.setAttribute(Qt.WA_DontShowOnScreen)
+    w.resize(1200, 800)
+    w.show()
+    for n in range(3):
+        img = QImage(800 + n * 300, 600, QImage.Format_ARGB32_Premultiplied)
+        img.fill(QColor(20, 80, 40))
+        w.ed.project_for_open()
+        w.ed.new_from_image(img)
+    app.processEvents()
+    ps = list(w.ed.projects)
+    assert len(ps) == 3
+    # вид каждого проекта запомнен с другим масштабом, потом окно поменяло размер
+    for p in ps:
+        w.ed.switch_project(p)
+        w.view.set_zoom(0.2)
+    w.resize(900, 700)
+    app.processEvents()
+    w.acts["fit_all"].trigger()
+    for p in ps:
+        w.ed.switch_project(p)
+        app.processEvents()
+        r = p.doc.export_rect()
+        vp = w.view.viewport().rect()
+        k = min(vp.width() / r.width(), vp.height() / r.height()) * 0.96
+        assert abs(w.view.transform().m11() - k) < 1e-6
+    # закрыть все: остаётся один пустой проект
+    for p in ps:
+        p.unsaved_copy = False
+        p.undo.setClean()
+    w.acts["project_close_all"].trigger()
+    assert len(w.ed.projects) == 1 and w.ed.doc.is_empty()
+    w.close()

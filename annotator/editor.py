@@ -1057,6 +1057,29 @@ class Editor(QObject):
     def raster_fill(self, color: QColor):
         self._raster_apply(lambda img, r: imageops.fill_rect(img, r, color), "Заливка области")
 
+    def rotate_images(self, items, deg: float):
+        """Повернуть вставленные изображения на deg градусов вокруг их центра (по часовой при deg > 0)."""
+        items = [i for i in items if i.TYPE == "image" and not i.locked]
+        if items:
+            self.change_items(items, lambda: [i.rotate_step(deg) for i in items], f"Поворот {deg:+g}°")
+
+    def fit_all_projects(self):
+        """Все проекты — вписать в окно: текущий сразу, остальные — при переходе к ним."""
+        for p in self.projects:
+            if p is not self.project:
+                p.view_state = None
+        if self.view is not None:
+            self.view.fit()
+
+    def flip_images(self, items, key: str):
+        """Отразить вставленные изображения: key — flip_h (по горизонтали) или flip_v (по вертикали)."""
+        items = [i for i in items if i.TYPE == "image" and not i.locked]
+        if not items:
+            return
+        new = not all(i.props.get(key) for i in items)
+        self.change_items(items, lambda: [i.set_prop(key, new) for i in items],
+                          "Отразить по горизонтали" if key == "flip_h" else "Отразить по вертикали")
+
     def raster_opacity(self, value: float):
         self._raster_apply(lambda img, r: imageops.set_rect_opacity(img, r, value), "Прозрачность области")
 
@@ -1071,7 +1094,8 @@ class Editor(QObject):
             new.setPos(QPointF(r.topLeft()))
         else:
             new = ImageItem(item.image.copy(r))
-            for k in ("brightness", "contrast", "saturation", "temperature", "curves", "keep_ratio"):
+            for k in ("brightness", "contrast", "saturation", "temperature", "curves", "keep_ratio",
+                      "flip_h", "flip_v"):
                 new.props[k] = copy.deepcopy(item.props.get(k))
             new.layer_id = item.layer_id
             new.rect = QRectF(0, 0, local.width(), local.height())
@@ -1188,6 +1212,9 @@ class Editor(QObject):
                 a = 180.0
             if a != float(it.props.get("angle", 0) or 0):
                 it.set_prop("angle", round(a, 3))
+            if it.TYPE == "image" and mirror:     # вставленная картинка отражается вместе с фото
+                k = "flip_h" if op == "fliph" else "flip_v"
+                it.set_prop(k, not it.props.get(k))
             it.setPos(it.pos() + (F(c) - it.mapToScene(piv)))
             return
         # объекты из точек: каждая точка — туда, где она теперь на фото; у надписей (блок не поворачивается)
