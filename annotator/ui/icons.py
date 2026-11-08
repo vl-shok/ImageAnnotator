@@ -222,6 +222,13 @@ def _draw(name, p: QPainter):
             p.drawLine(QPointF(x, y), QPointF(x + dx * 14, y))
             p.drawLine(QPointF(x, y), QPointF(x, y + dy * 14))
         p.drawRect(QRectF(22, 22, 20, 20))
+    elif name == "fit_all":
+        # «вписать» для всех: уголки рамки и две стопкой лежащие страницы
+        for (x, y, dx, dy) in ((6, 6, 1, 1), (58, 6, -1, 1), (58, 58, -1, -1), (6, 58, 1, -1)):
+            p.drawLine(QPointF(x, y), QPointF(x + dx * 12, y))
+            p.drawLine(QPointF(x, y), QPointF(x, y + dy * 12))
+        p.drawRect(QRectF(24, 18, 22, 18))
+        p.drawRect(QRectF(18, 28, 22, 18))
     elif name == "actual":
         f = QFont("Segoe UI")
         f.setBold(True)

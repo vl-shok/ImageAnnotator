@@ -545,6 +545,7 @@ class ProjectStrip(QFrame):
         m.addAction("Быстрый PNG всех", cb.quick_png_all)
         if proj is not None:
             many = len(self.ed.projects) > 1
+            m.addAction("Закрыть все", cb.close_all)
             a = m.addAction("Закрыть остальные", lambda: cb.close_others(proj))
             a.setEnabled(many)
             i = self.ed.projects.index(proj)
