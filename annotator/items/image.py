@@ -37,9 +37,12 @@ class ImageItem(BoxItem):
     ROTATABLE = True
     SHIFT_FREES = True
     DEFAULTS = {"angle": 0.0, "keep_ratio": True, "opacity": 1.0, "border": False, "border_color": "#ff2020", "border_width": 2.0,
-                "brightness": 0, "contrast": 0, "saturation": 100, "temperature": 0, "curves": None}
+                "brightness": 0, "contrast": 0, "saturation": 100, "temperature": 0, "curves": None,
+                "flip_h": False, "flip_v": False}
     PROPS = [
         ANGLE,
+        PropSpec("flip_h", "Отразить по горизонтали", "bool", "Изображение"),
+        PropSpec("flip_v", "Отразить по вертикали", "bool", "Изображение"),
         PropSpec("keep_ratio", "Сохранять пропорции (углы)", "bool", "Изображение"),
         PropSpec("border", "Рамка", "bool", "Изображение"),
         PropSpec("border_color", "Цвет рамки", "color", "Изображение"),
@@ -70,6 +73,7 @@ class ImageItem(BoxItem):
         return self._pix
 
     def props_changed(self):
+        super().props_changed()      # угол поворота
         self.update()
 
     # --------------------------------------------------------- serialization
@@ -92,6 +96,26 @@ class ImageItem(BoxItem):
         else:
             self.src = QRectF(0, 0, self.image.width(), self.image.height())
 
+    # --------------------------------------------------------- отражение
+    # Отражение не меняет пиксели: картинка рисуется зеркально внутри своей рамки. Поэтому всё, что
+    # переводит видимое место в пиксели (обрезка, области фото), сначала «разворачивает» его обратно.
+    def flips(self) -> tuple[bool, bool]:
+        return bool(self.props.get("flip_h")), bool(self.props.get("flip_v"))
+
+    def unflip_local(self, local: QRectF) -> QRectF:
+        """Видимый прямоугольник (локально) -> где он был бы без отражения."""
+        fh, fv = self.flips()
+        r = self.rect
+        x = r.left() + r.right() - local.right() if fh else local.x()
+        y = r.top() + r.bottom() - local.bottom() if fv else local.y()
+        return QRectF(x, y, local.width(), local.height())
+
+    def flipped_src(self) -> QRectF:
+        """Видимая часть картинки в «зеркальных» пикселях (для расчёта места полной картинки)."""
+        fh, fv = self.flips()
+        s, w, h = self.src, self.image.width(), self.image.height()
+        return QRectF(w - s.right() if fh else s.x(), h - s.bottom() if fv else s.y(), s.width(), s.height())
+
     # --------------------------------------------------------- crop
     def crop_to_scene_rect(self, scene_rect: QRectF):
         """Неразрушающая обрезка: видимая часть = пересечение с scene_rect."""
@@ -101,8 +125,9 @@ class ImageItem(BoxItem):
             return
         sx = self.src.width() / r.width()
         sy = self.src.height() / r.height()
-        self.src = QRectF(self.src.x() + (local.x() - r.x()) * sx,
-                          self.src.y() + (local.y() - r.y()) * sy,
+        u = self.unflip_local(local)
+        self.src = QRectF(self.src.x() + (u.x() - r.x()) * sx,
+                          self.src.y() + (u.y() - r.y()) * sy,
                           local.width() * sx, local.height() * sy)
         anchor = self.mapToScene(local.topLeft())
         self._apply_rect(QRectF(0, 0, local.width(), local.height()), QPointF(0, 0), anchor)
@@ -114,7 +139,8 @@ class ImageItem(BoxItem):
         r = self.rect
         kx = r.width() / self.src.width()
         ky = r.height() / self.src.height()
-        new = QRectF(r.x() - self.src.x() * kx, r.y() - self.src.y() * ky,
+        s = self.flipped_src()
+        new = QRectF(r.x() - s.x() * kx, r.y() - s.y() * ky,
                      self.image.width() * kx, self.image.height() * ky)
         self.src = QRectF(0, 0, self.image.width(), self.image.height())
         anchor = self.mapToScene(r.topLeft())
@@ -141,7 +167,8 @@ class ImageItem(BoxItem):
             return None, None
         sx = self.src.width() / r.width()
         sy = self.src.height() / r.height()
-        px = QRectF(self.src.x() + (local.x() - r.x()) * sx, self.src.y() + (local.y() - r.y()) * sy,
+        u = self.unflip_local(local)
+        px = QRectF(self.src.x() + (u.x() - r.x()) * sx, self.src.y() + (u.y() - r.y()) * sy,
                     local.width() * sx, local.height() * sy).toAlignedRect()
         px = px.intersected(self.image.rect())
         if px.isEmpty():
@@ -168,7 +195,16 @@ class ImageItem(BoxItem):
         self.paint_opacity(painter)
         pm = self.pixmap()
         if pm is not None:
+            fh, fv = self.flips()
+            if fh or fv:
+                c = self.rect.center()
+                painter.save()
+                painter.translate(c)
+                painter.scale(-1 if fh else 1, -1 if fv else 1)
+                painter.translate(-c)
             painter.drawPixmap(self.rect, pm, self.src)
+            if fh or fv:
+                painter.restore()
         if self.props.get("border"):
             pen = make_pen(self.props["border_color"], self.props["border_width"])
             pen.setJoinStyle(Qt.MiterJoin)

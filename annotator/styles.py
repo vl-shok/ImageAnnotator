@@ -12,7 +12,7 @@ _STYLE: dict[str, dict] = {}
 
 # свойства, которые не являются «стилем» и не запоминаются
 NON_STYLE = {"text", "number", "angle", "brightness", "contrast", "saturation", "temperature", "curves",
-             "label_side"}
+             "label_side", "flip_h", "flip_v"}
 
 # Размерные свойства хранятся «для фото ~1600 px» и масштабируются под размер
 # текущего изображения, чтобы стрелки/текст были одинаково заметны на любом фото.
