@@ -30,7 +30,7 @@ PRJ_FILTER = f"Проект ImageAnnotator (*{PROJECT_EXT})"
 HOTKEYS = [
     ("Инструменты", ""),
     ("V", "Выбор"), ("M", "Выделение области фото"), ("K", "Обрезка / размер холста (и вставленного изображения)"), ("A", "Стрелка"), ("L", "Линия"), ("T", "Текст"),
-    ("C", "Выноска"), ("N", "Нумерация"), ("R", "Прямоугольник"), ("E", "Эллипс"), ("Q", "Резистор (место компонента)"), ("O", "Галочка «одобрено»"), ("X", "Крестик «не устанавливать»"),
+    ("C", "Выноска"), ("N", "Нумерация"), ("R", "Прямоугольник"), ("E", "Эллипс"), ("Q", "Резистор (место компонента)"), ("U", "3D-элемент (имитация компонента)"), ("O", "Галочка «одобрено»"), ("X", "Крестик «не устанавливать»"),
     ("P", "Полилиния"),
     ("G", "Полигон"), ("F", "Карандаш"), ("D", "Размер (расстояние)"), ("B", "Разрыв цепи"),
     ("Z", "Выносной вид (лупа): выделите область — рядом появится увеличение"),
@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
         self.tool_group = QActionGroup(self)
         self.tool_group.setExclusive(True)
         icons = {"select": "select", "raster": "raster", "crop": "crop", "dimension": "dimension", "break": "break", "magnifier": "magnifier", "arrow": "arrow", "line": "line", "text": "text",
-                 "callout": "callout", "number": "number", "rect": "rect", "ellipse": "ellipse", "resistor": "resistor", "check": "check", "cross": "cross",
+                 "callout": "callout", "number": "number", "rect": "rect", "ellipse": "ellipse", "resistor": "resistor", "box3d": "box3d", "check": "check", "cross": "cross",
                  "polyline": "polyline", "polygon": "polygon", "freehand": "freehand"}
         for name, tool in ed.tools.items():
             a = A(f"tool_{name}", tool.title, (lambda n: (lambda: ed.set_tool(n)))(name), tool.shortcut,
@@ -321,12 +321,17 @@ class MainWindow(QMainWindow):
         tb.setIconSize(QSize(22, 22))
         tb.setOrientation(Qt.Vertical)
         self.addToolBar(Qt.LeftToolBarArea, tb)
+        # прямоугольник, многоугольник и 3D-элемент — одна кнопка (долгое нажатие — выбор)
+        from .ui.tool_flyout import ToolFlyout
+        self.shape_flyout = ToolFlyout([self.acts[f"tool_{n}"] for n in self.SHAPE_GROUP], tb)
         order = ["select", "raster", "crop", None, "arrow", "line", "text", "callout", "number", None,
-                 "rect", "ellipse", "polyline", "polygon", "freehand", None, "dimension", "break", "magnifier",
+                 "shapes", "ellipse", "polyline", "freehand", None, "dimension", "break", "magnifier",
                  "resistor", "check", "cross"]
         for n in order:
             if n is None:
                 tb.addSeparator()
+            elif n == "shapes":
+                tb.addWidget(self.shape_flyout)
             else:
                 tb.addAction(self.acts[f"tool_{n}"])
         tb.addSeparator()
@@ -417,10 +422,14 @@ class MainWindow(QMainWindow):
         self.acts["snap"].setChecked(ed.snap.enabled)
 
     # ================================================================ state / ui updates
+    SHAPE_GROUP = ("rect", "polygon", "box3d")
+
     def _on_tool(self, name):
         a = self.acts.get(f"tool_{name}")
         if a and not a.isChecked():
             a.setChecked(True)
+        if name in self.SHAPE_GROUP and hasattr(self, "shape_flyout"):
+            self.shape_flyout.show_action(a)       # кнопка группы показывает выбранный инструмент
         tool = self.ed.tool
         self.hint_lbl.setText(f"{tool.title}:  {tool.hint()}" if tool.hint() else tool.title)
         self._update_actions()
