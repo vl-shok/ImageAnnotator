@@ -10,7 +10,7 @@ from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPen
 
 from ..geometry import constrain_angle, dist
-from ..items import (ArrowItem, BreakItem, CalloutItem, CheckItem, CrossItem, DimensionItem, MagnifierItem, EllipseItem, FreehandItem, LineItem, NumberItem,
+from ..items import (ArrowItem, Box3DItem, BreakItem, CalloutItem, CheckItem, CrossItem, DimensionItem, MagnifierItem, EllipseItem, FreehandItem, LineItem, NumberItem,
                      PolygonItem, PolylineItem, RectItem, ResistorItem, TextItem)
 from .base import Tool, ToolEvent
 
@@ -227,6 +227,121 @@ class PolyTool(Tool, _TempMixin):
             self.temp.set_scene_points(self.pts + [self.pts[-1]])
         else:
             self.cancel()
+
+
+# =====================================================================
+class Box3DTool(Tool, _TempMixin):
+    """3D-элемент: первая линия — сторона основания A→B, вторая (из B) — соседняя сторона B→C;
+    пока ведётся вторая линия, параллелограмм A, B, C, A + C − B достраивается на лету.
+    Линии можно тянуть или ставить кликами; Shift — 0/45/90°."""
+    creation = True
+    name = "box3d"
+    title = "3D-элемент (имитация компонента)"
+    shortcut = "U"
+
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.temp = None
+        self.a = self.b = None          # сцена: начало и конец первой линии
+        self.stage = 0                  # 0 — ничего, 1 — первая линия, 2 — вторая
+
+    def busy(self):
+        return self.temp is not None
+
+    def hint(self):
+        if self.stage == 2:
+            return "Вторая сторона: ведите мышь — угол и ширина основания, клик / Enter — готово. Backspace — назад"
+        if self.stage == 1:
+            return "Первая сторона основания: тяните или кликните конец. Shift — 0/45/90°, Esc — отмена"
+        return "Нарисуйте сторону основания, затем вторую сторону — параллелограмм достроится сам"
+
+    def _point(self, e, anchor):
+        p = self.view.snap(e.pos, exclude=[self.temp], anchor=anchor, guides=not e.shift)
+        return constrain_angle(anchor, p) if e.shift else p
+
+    def _show(self, pts):
+        self.temp.set_scene_points(pts)
+
+    def press(self, e: ToolEvent):
+        if e.button != Qt.LeftButton:
+            return
+        if self.stage == 0:
+            self.a = self.view.snap(e.pos)
+            self._start_temp(Box3DItem())
+            self._show([self.a] * 4)
+            self.stage = 1
+            self.dragging = True
+        elif self.stage == 1:                       # клик-клик: второй клик — конец первой линии
+            self._end_first(self._point(e, self.a))
+        else:
+            c = self._point(e, self.b)
+            if self.screen_dist(c, self.b) >= MIN_SIZE_PX:
+                self._show([self.a, self.b, c, self.a + c - self.b])
+                self._commit()
+
+    def move(self, e: ToolEvent):
+        if self.temp is None:
+            return super().move(e)
+        if self.stage == 1:
+            b = self._point(e, self.a)
+            self._show([self.a, b, b, self.a])      # пока — просто линия
+        else:
+            c = self._point(e, self.b)
+            self._show([self.a, self.b, c, self.a + c - self.b])
+
+    def release(self, e: ToolEvent):
+        if e.button != Qt.LeftButton or self.stage != 1 or not getattr(self, "dragging", False):
+            return
+        self.dragging = False
+        b = self._point(e, self.a)
+        if self.screen_dist(b, self.a) >= MIN_SIZE_PX:
+            self._end_first(b)                      # протянули — первая линия готова
+
+    def _end_first(self, b):
+        if self.screen_dist(b, self.a) < MIN_SIZE_PX:
+            return
+        self.b = b
+        self.stage = 2
+        self._show([self.a, b, b, self.a])
+
+    def _commit(self):
+        self._commit_temp(self.title)
+        self.stage = 0
+        self.a = self.b = None
+        self.view.snap_hit = None
+
+    def finish(self):
+        if self.temp is None:
+            return False
+        if self.stage == 2:
+            pts = self.temp.scene_points()
+            if self.screen_dist(pts[2], self.b) >= MIN_SIZE_PX:
+                self._commit()
+                return True
+        return self.cancel()
+
+    def key(self, ev):
+        if self.temp is not None and self.stage == 2 and ev.key() == Qt.Key_Backspace:
+            self.stage, self.b = 1, None            # заново первая линия от той же точки
+            self.dragging = False
+            self._show([self.a] * 4)
+            return True
+        return False
+
+    def cancel(self):
+        if self.temp is None:
+            return False
+        self._drop_temp()
+        self.stage = 0
+        self.a = self.b = None
+        return True
+
+    def action_bar(self):
+        if self.temp is None:
+            return None
+        if self.stage == 2:
+            return (f"{self.title}: вторая сторона", [("✓  Готово", self.finish), ("✕  Отменить", self.cancel)])
+        return (f"{self.title}: первая сторона", [("✕  Отменить", self.cancel)])
 
 
 # =====================================================================
@@ -601,6 +716,7 @@ def make_tools(editor):
         TwoPointTool(editor, RectItem, "rect", "Прямоугольник", "R", box=True),
         TwoPointTool(editor, EllipseItem, "ellipse", "Эллипс", "E", box=True),
         TwoPointTool(editor, ResistorItem, "resistor", "Резистор (место компонента)", "Q", box=True),
+        Box3DTool(editor),
         TwoPointTool(editor, CheckItem, "check", "Галочка «одобрено»", "O", box=True),
         TwoPointTool(editor, CrossItem, "cross", "Крестик «не устанавливать»", "X", box=True),
         PolyTool(editor, PolylineItem, "polyline", "Полилиния", "P"),

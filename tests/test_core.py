@@ -1959,3 +1959,260 @@ def test_close_all_and_fit_all(tmp_path, monkeypatch):
     w.acts["project_close_all"].trigger()
     assert len(w.ed.projects) == 1 and w.ed.doc.is_empty()
     w.close()
+
+
+def test_box3d_element(ed):
+    import math
+    from annotator.items import REGISTRY, Box3DItem, create_from_dict
+    assert REGISTRY["box3d"] is Box3DItem
+    it = Box3DItem()
+    it.set_drag(QPointF(100, 200), QPointF(300, 300))           # рисуется как прямоугольник
+    ed.add_items([it])
+    pts = it.scene_points()
+    assert [(p.x(), p.y()) for p in pts] == [(100, 200), (300, 200), (300, 300), (100, 300)]
+    assert it.props["height"] == 0 and it.side_faces() == []    # сначала плоский
+    # сторона: тянем верхнюю сторону вправо (Shift — только вдоль неё) -> параллелограмм
+    it.begin_handle_drag(4)
+    it.move_handle(4, it.mapFromScene(QPointF(240, 150)), constrain=True)
+    pts = it.scene_points()
+    assert [(p.x(), p.y()) for p in pts[:2]] == [(140, 200), (340, 200)]   # сдвиг только по X
+    assert (pts[2].x(), pts[3].x()) == (300, 100)                           # нижняя сторона на месте
+    # угол: противоположный на месте, перекос сохраняется
+    it.begin_handle_drag(2)
+    it.move_handle(2, it.mapFromScene(QPointF(400, 400)))
+    p0, p1, p2, p3 = it.scene_points()
+    assert (p0.x(), p0.y()) == (140, 200)
+    assert abs((p1 - p0).x() - (p2 - p3).x()) < 1e-6 and abs((p3 - p0).y() - (p2 - p1).y()) < 1e-6
+    # высота из свойств: вверх — видна передняя грань; направление 225° (вверх-влево) — две грани
+    it.set_prop("height", 30)
+    assert len(it.side_faces()) >= 1
+    b0 = it.outline_path().boundingRect()
+    it.set_prop("height_angle", -135)
+    assert len(it.side_faces()) == 2
+    assert it.outline_path().boundingRect().left() < b0.left()
+    # надпись: система координат верхней грани — X вдоль длинной стороны слева направо, не зеркально
+    tf, length, width = it.label_frame()
+    xh = tf.map(QPointF(1, 0)) - tf.map(QPointF(0, 0))
+    yh = tf.map(QPointF(0, 1)) - tf.map(QPointF(0, 0))
+    assert xh.x() > 0 and xh.x() * yh.y() - xh.y() * yh.x() > 0
+    assert length >= width
+    f = it.label_font(length, width)
+    assert f.pixelSize() > 5
+    # поворот пробелом поворачивает и направление высоты
+    it.set_prop("height_angle", -90)
+    ed.sel.set([it])
+    ed.rotate_selected(90)
+    assert abs(it.props["height_angle"] - 0) < 1e-6
+    ed.transform_canvas("fliph")
+    assert abs(abs(it.props["height_angle"]) - 180) < 1e-6
+    # сохранение и загрузка
+    it2 = create_from_dict(it.to_dict(full=True))
+    assert len(it2.points) == 4 and it2.props["height"] == 30
+
+
+def test_shape_flyout(tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings, Qt
+    from annotator import mainwindow, styles
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
+    styles.reset()
+    w = mainwindow.MainWindow()
+    fl = w.shape_flyout
+    assert [a for a in fl.group_actions] == [w.acts["tool_rect"], w.acts["tool_polygon"], w.acts["tool_box3d"]]
+    from PySide6.QtWidgets import QToolButton
+    assert fl.popupMode() == QToolButton.DelayedPopup and fl.menu().actions() == fl.group_actions
+    assert fl.defaultAction() is w.acts["tool_rect"]
+    w.ed.set_tool("box3d")                         # выбран из списка или клавишей U
+    assert fl.defaultAction() is w.acts["tool_box3d"] and w.acts["tool_box3d"].isChecked()
+    w.ed.set_tool("arrow")
+    assert fl.defaultAction() is w.acts["tool_box3d"]   # кнопка помнит последний инструмент группы
+    fl.click()
+    assert w.ed.tool.name == "box3d"
+    for p in w.ed.projects:
+        p.unsaved_copy = False
+    w.close()
+
+
+def test_box3d_two_lines(tmp_path, monkeypatch):
+    from PySide6.QtCore import QEvent, QSettings, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtTest import QTest
+    from annotator import mainwindow, styles
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
+    styles.reset()
+    w = mainwindow.MainWindow()
+    w.setAttribute(Qt.WA_DontShowOnScreen)
+    w.resize(1400, 900)
+    w.show()
+    img = QImage(800, 600, QImage.Format_ARGB32_Premultiplied)
+    img.fill(QColor(20, 80, 40))
+    w.ed.new_from_image(img)
+    app.processEvents()
+    v = w.view
+    v.fit()
+    app.processEvents()
+    vp = v.viewport()
+    w.ed.snap.enabled = False
+
+    def at(x, y):
+        return v.mapFromScene(QPointF(x, y))
+
+    def move(x, y, buttons=Qt.NoButton):
+        pt = QPointF(at(x, y))
+        QApplication.sendEvent(vp, QMouseEvent(QEvent.MouseMove, pt, vp.mapToGlobal(pt), Qt.NoButton,
+                                               buttons, Qt.NoModifier))
+
+    def boxes():
+        return [i for i in w.ed.doc.items() if i.TYPE == "box3d"]
+    w.ed.set_tool("box3d")
+    # первая линия — протянуть мышью
+    QTest.mousePress(vp, Qt.LeftButton, Qt.NoModifier, at(200, 300))
+    move(300, 250, Qt.LeftButton)
+    QTest.mouseRelease(vp, Qt.LeftButton, Qt.NoModifier, at(300, 250))
+    assert w.ed.tool.stage == 2
+    # вторая линия — параллелограмм достраивается на лету
+    move(340, 330)
+    pts = w.ed.tool.temp.scene_points()
+    assert (pts[3] - (pts[0] + pts[2] - pts[1])).manhattanLength() < 1e-6     # A + C - B
+    assert (pts[3] - QPointF(240, 380)).manhattanLength() < 3          # (экранные пиксели округляются)
+    QTest.mouseClick(vp, Qt.LeftButton, Qt.NoModifier, at(340, 330))
+    assert len(boxes()) == 1
+    it = boxes()[0]
+    want = [(200, 300), (300, 250), (340, 330), (240, 380)]
+    assert all(abs(p.x() - x) + abs(p.y() - y) < 3 for p, (x, y) in zip(it.scene_points(), want))
+    assert it.props["height"] == 0
+    # меняем высоту у этого элемента — у следующего она не запоминается
+    w.ed.sel.set([it])
+    it.set_prop("height", 40)
+    styles.remember("box3d", "height", 40)
+    styles.remember("box3d", "fill_color", "#aa0000")
+    w.ed.set_tool("box3d")
+    # клик-клик-клик
+    for x, y in ((500, 300), (600, 300), (620, 360)):
+        move(x, y)
+        QTest.mouseClick(vp, Qt.LeftButton, Qt.NoModifier, at(x, y))
+    assert len(boxes()) == 2
+    it2 = boxes()[1]
+    assert it2.props["height"] == 0 and it2.props["fill_color"] == "#aa0000"   # высота — нет, цвет — да
+    # Backspace на второй линии — заново первая; Esc — отмена
+    QTest.mouseClick(vp, Qt.LeftButton, Qt.NoModifier, at(100, 100))
+    QTest.mouseClick(vp, Qt.LeftButton, Qt.NoModifier, at(150, 100))
+    assert w.ed.tool.stage == 2
+    QTest.keyClick(vp, Qt.Key_Backspace)
+    assert w.ed.tool.stage == 1
+    QTest.keyClick(vp, Qt.Key_Escape)
+    assert w.ed.tool.temp is None and len(boxes()) == 2
+    for p in w.ed.projects:
+        p.unsaved_copy = False
+        p.undo.setClean()
+    w.close()
+
+
+def test_box3d_height_handle(tmp_path, monkeypatch):
+    import math
+    from PySide6.QtCore import QEvent, QSettings, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtTest import QTest
+    from annotator import mainwindow, styles
+    from annotator.items import Box3DItem
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
+    styles.reset()
+    w = mainwindow.MainWindow()
+    w.setAttribute(Qt.WA_DontShowOnScreen)
+    w.resize(1400, 900)
+    w.show()
+    img = QImage(800, 600, QImage.Format_ARGB32_Premultiplied)
+    img.fill(QColor(20, 80, 40))
+    w.ed.new_from_image(img)
+    app.processEvents()
+    v = w.view
+    v.fit()
+    app.processEvents()
+    vp = v.viewport()
+    w.ed.snap.enabled = False
+    it = Box3DItem()
+    it.set_drag(QPointF(300, 300), QPointF(500, 400))
+    w.ed.add_items([it])
+    w.ed.set_tool("select")
+    w.ed.sel.set([it])
+    app.processEvents()
+    kinds = it.handle_kinds()
+    assert kinds[it.HEIGHT_HANDLE] == "height"
+    h = it.mapToScene(it.handles()[it.HEIGHT_HANDLE])
+    c = it.mapToScene(it.center())
+    assert h.y() < c.y() and abs(h.x() - c.x()) < 1e-6      # у плоского — чуть выше центра
+
+    def vpt(p):
+        return v.mapFromScene(p)
+
+    def drag(p0, p1, mods=Qt.NoModifier):
+        QTest.mousePress(vp, Qt.LeftButton, Qt.NoModifier, vpt(p0))   # Shift до нажатия — перенос объекта
+        for t in (0.3, 0.7, 1.0):
+            pt = QPointF(vpt(p0 + (p1 - p0) * t))
+            QApplication.sendEvent(vp, QMouseEvent(QEvent.MouseMove, pt, vp.mapToGlobal(pt), Qt.NoButton,
+                                                   Qt.LeftButton, mods))
+        QTest.mouseRelease(vp, Qt.LeftButton, mods, vpt(p1))
+    # тянем маркер вверх — корпус поднимается
+    drag(h, c + QPointF(0, -60))
+    assert abs(it.props["height"] - 60) <= 2 and abs(it.props["height_angle"] + 90) < 2
+    assert len(it.side_faces()) == 1
+    # маркер теперь в центре верхней грани; тянем вверх-вправо — меняется и направление
+    h = it.mapToScene(it.handles()[it.HEIGHT_HANDLE])
+    assert (h - (c + QPointF(0, -it.props["height"]))).manhattanLength() < 2
+    drag(h, c + QPointF(40, -40))
+    assert abs(it.props["height"] - 40 * math.sqrt(2)) <= 2 and abs(it.props["height_angle"] + 45) < 2
+    # Shift во время перетаскивания — только высота, направление прежнее
+    h = it.mapToScene(it.handles()[it.HEIGHT_HANDLE])
+    drag(h, c + QPointF(0, -100), Qt.ShiftModifier)
+    assert abs(it.props["height_angle"] + 45) < 2 and abs(it.props["height"] - 100 / math.sqrt(2)) <= 2
+    # отмена — по шагам назад
+    w.ed.undo.undo()
+    assert abs(it.props["height_angle"] + 45) < 2 and abs(it.props["height"] - 40 * math.sqrt(2)) <= 2
+    for p in w.ed.projects:
+        p.unsaved_copy = False
+        p.undo.setClean()
+    w.close()
+
+
+def test_label_size_turns_off_auto(tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QCheckBox
+    from annotator import mainwindow, styles
+    from annotator.items import Box3DItem, ResistorItem
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(mainwindow, "QSettings", lambda *a: QSettings(ini, QSettings.IniFormat))
+    styles.reset()
+    w = mainwindow.MainWindow()
+    img = QImage(800, 600, QImage.Format_ARGB32_Premultiplied)
+    img.fill(QColor(20, 80, 40))
+    w.ed.new_from_image(img)
+    box = Box3DItem()
+    box.set_drag(QPointF(100, 100), QPointF(300, 200))
+    res = ResistorItem()
+    res.set_drag(QPointF(400, 100), QPointF(600, 200))
+    res.set_prop("show_text", True)
+    w.ed.add_items([box, res])
+    for it, label in ((box, "Размер по грани"), (res, "Размер по корпусу")):
+        w.ed.sel.set([it])
+        app.processEvents()
+        assert it.props["auto_size"]
+        w.ed.set_prop("size", 33)                  # как поле «Размер» в свойствах
+        app.processEvents()
+        assert it.props["size"] == 33 and not it.props["auto_size"]
+        if it is box:
+            tf, length, width = it.label_frame()
+            assert it.label_font(length, width).pixelSize() == 33
+        else:
+            assert it.label_font().pixelSize() == 33
+        QTest.qWait(100)                            # панель обновляет значения по таймеру
+        eds = [e for e, g in w.props._editors if g.__closure__ and g.__closure__[0].cell_contents == "auto_size"]
+        assert eds and isinstance(eds[0], QCheckBox) and not eds[0].isChecked()   # галочка в панели снялась
+        w.ed.undo.undo()                            # одна отмена — и размер, и автоподбор
+        assert it.props["auto_size"] and it.props["size"] != 33
+    for p in w.ed.projects:
+        p.unsaved_copy = False
+        p.undo.setClean()
+    w.close()

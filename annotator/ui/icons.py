@@ -161,6 +161,16 @@ def _draw(name, p: QPainter):
         p.drawRoundedRect(QRectF(10, 10, 44, 44), 6, 6)
         p.setPen(_pen(QColor(70, 200, 100), 6.0))
         p.drawPolyline(QPolygonF([QPointF(20, 33), QPointF(29, 42), QPointF(45, 22)]))
+    elif name == "box3d":
+        # корпус: верхняя грань и две боковые (выдавлены вниз-вправо), боковые темнее
+        p.setPen(_pen(FG, 2.5))
+        p.setBrush(QColor(78, 82, 90))
+        p.drawPolygon(QPolygonF([QPointF(44, 14), QPointF(54, 26), QPointF(54, 50), QPointF(44, 38)]))
+        p.setBrush(QColor(58, 61, 68))
+        p.drawPolygon(QPolygonF([QPointF(10, 38), QPointF(44, 38), QPointF(54, 50), QPointF(20, 50)]))
+        p.setBrush(QColor(125, 130, 140))
+        p.drawRect(QRectF(10, 14, 34, 24))
+        p.setBrush(Qt.NoBrush)
     elif name == "cross":
         # крестик «не устанавливать»
         p.setPen(_pen(QColor(235, 70, 70), 6.0))

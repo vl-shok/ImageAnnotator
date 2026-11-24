@@ -638,6 +638,15 @@ class CanvasView(QGraphicsView):
             painter.drawPolygon(QPolygonF([QPointF(sp.x(), sp.y() - s), QPointF(sp.x() + s, sp.y()),
                                            QPointF(sp.x(), sp.y() + s), QPointF(sp.x() - s, sp.y())]))
             return
+        if kind == "height":   # высота 3D-элемента — жёлтый треугольник-«стрелка вверх»
+            s = self.px(HANDLE_PX + (6 if hover else 4)) * 0.85
+            pen = QPen(QColor(20, 20, 20), 1)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(QColor(255, 140, 0) if hover else QColor(255, 215, 60))
+            painter.drawPolygon(QPolygonF([QPointF(sp.x(), sp.y() - s), QPointF(sp.x() + s * 0.9, sp.y() + s * 0.7),
+                                           QPointF(sp.x() - s * 0.9, sp.y() + s * 0.7)]))
+            return
         if kind == "rot":
             s = self.px(HANDLE_PX + (3 if hover else 1)) / 2
             pen = QPen(QColor(20, 20, 20), 1)
